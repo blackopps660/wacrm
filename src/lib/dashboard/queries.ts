@@ -3,7 +3,6 @@ import {
   daysAgoStart,
   DOW_SHORT_MON_FIRST,
   lastNDayKeys,
-  localDayKey,
   mondayIndex,
   startOfLocalDay,
 } from './date-utils'
@@ -106,23 +105,32 @@ export async function loadConversationsSeries(
   rangeDays: number,
 ): Promise<ConversationsSeriesPoint[]> {
   const start = daysAgoStart(rangeDays - 1).toISOString()
-  const { data, error } = await db
-    .from('messages')
-    .select('created_at, sender_type')
-    .gte('created_at', start)
-    .order('created_at', { ascending: true })
+  // Bucketing happens in Postgres now (see migration 034's
+  // dashboard_conversations_series) instead of fetching every message
+  // row in range just to count incoming/outgoing per day client-side —
+  // at 2-3k messages/day per workspace, a 90-day chart used to pull
+  // 200k+ rows to compute what's really an 8-number result. The tz
+  // offset is passed through so day boundaries still land on the
+  // user's local midnight, matching this file's "local day" semantics
+  // (see the migration's comment for the DST-only precision tradeoff).
+  const tzOffsetMinutes = -new Date().getTimezoneOffset()
+  const { data, error } = await db.rpc('dashboard_conversations_series', {
+    p_start: start,
+    p_tz_offset_minutes: tzOffsetMinutes,
+  })
   if (error) throw error
 
   const keys = lastNDayKeys(rangeDays)
   const buckets = new Map<string, { incoming: number; outgoing: number }>()
   for (const k of keys) buckets.set(k, { incoming: 0, outgoing: 0 })
 
-  for (const row of (data ?? []) as { created_at: string; sender_type: string }[]) {
-    const key = localDayKey(row.created_at)
-    const bucket = buckets.get(key)
+  for (const row of (data ?? []) as { day: string; incoming: number; outgoing: number }[]) {
+    // `day` comes back as a plain `YYYY-MM-DD` date string — already
+    // the same key shape `localDayKey` produces client-side.
+    const bucket = buckets.get(row.day)
     if (!bucket) continue
-    if (row.sender_type === 'customer') bucket.incoming += 1
-    else bucket.outgoing += 1 // agent + bot both count as outgoing
+    bucket.incoming = Number(row.incoming)
+    bucket.outgoing = Number(row.outgoing)
   }
 
   return keys.map((day) => ({ day, ...(buckets.get(day) ?? { incoming: 0, outgoing: 0 }) }))
@@ -170,51 +178,33 @@ export async function loadPipelineDonut(db: DB): Promise<PipelineDonutData> {
 // --- 4. Response time by day of week ----------------------------------
 
 export async function loadResponseTime(db: DB): Promise<ResponseTimeSummary> {
-  // Pull the last 14 days of messages in one shot, then walk per
-  // conversation to find each "first inbound" → "first subsequent
-  // outbound" pair. 14 days gives us both "this week" + "last week"
+  // Pairing "first unreplied customer message" -> "first subsequent
+  // outbound message" now happens in Postgres (migration 034's
+  // dashboard_response_time_samples, a gaps-and-islands window-function
+  // query) instead of fetching every message row in the last 14 days
+  // just to walk each conversation in order client-side. The RPC
+  // returns only the resulting (customerAt, responseAt) pairs — day-of-
+  // week bucketing and the this-week/last-week averages below are
+  // unchanged, they just run over this much smaller derived set instead
+  // of raw messages. 14 days gives us both "this week" + "last week"
   // with enough overlap if the user opens the dashboard late on a
   // Monday.
   const fourteenDaysAgo = daysAgoStart(13).toISOString()
-  const { data, error } = await db
-    .from('messages')
-    .select('conversation_id, sender_type, created_at')
-    .gte('created_at', fourteenDaysAgo)
-    .order('conversation_id', { ascending: true })
-    .order('created_at', { ascending: true })
+  const { data, error } = await db.rpc('dashboard_response_time_samples', {
+    p_start: fourteenDaysAgo,
+  })
   if (error) throw error
 
-  const rows = (data ?? []) as {
-    conversation_id: string
-    sender_type: string
-    created_at: string
-  }[]
-
-  // Group per conversation, pair unreplied customer messages with the
-  // next outbound message from the agent/bot. A single customer message
-  // can only count once (avoids inflating averages if the customer
-  // double-messages while the agent takes time to reply).
   interface Sample {
     customerAt: Date
     responseAt: Date
   }
-  const samples: Sample[] = []
-
-  let currentConv = ''
-  let pendingCustomer: Date | null = null
-  for (const row of rows) {
-    if (row.conversation_id !== currentConv) {
-      currentConv = row.conversation_id
-      pendingCustomer = null
-    }
-    const ts = new Date(row.created_at)
-    if (row.sender_type === 'customer') {
-      if (!pendingCustomer) pendingCustomer = ts
-    } else if (pendingCustomer) {
-      samples.push({ customerAt: pendingCustomer, responseAt: ts })
-      pendingCustomer = null
-    }
-  }
+  const samples: Sample[] = (
+    (data ?? []) as { customer_at: string; response_at: string }[]
+  ).map((row) => ({
+    customerAt: new Date(row.customer_at),
+    responseAt: new Date(row.response_at),
+  }))
 
   const now = new Date()
   const thisWeekStart = daysAgoStart(mondayIndex(now))

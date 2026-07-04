@@ -20,17 +20,39 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+
+// Conversation lists grow unbounded over time (one row per contact who has
+// ever messaged in), so the initial/resync fetch only pulls the most
+// recent page — loading every conversation an account has ever had would
+// slow inbox-open more and more as history accumulates (the whole point
+// of this fix). Older conversations are reached via "Load more", a
+// straightforward last_message_at cursor rather than OFFSET: this list's
+// sort key changes constantly (any new message bumps a conversation back
+// to the top), and OFFSET pagination silently skips/duplicates rows when
+// the ordering shifts under it between page fetches.
+const PAGE_SIZE = 50;
 
 interface ConversationListProps {
   activeConversationId: string | null;
   onSelect: (conversation: Conversation) => void;
   conversations: Conversation[];
+  /**
+   * Called with a batch of freshly-fetched conversation rows — the first
+   * page (mount / resync) or a subsequent "Load more" page. The parent
+   * merges the batch into its `conversations` state by id rather than
+   * replacing it wholesale, so a resync-triggered refetch of page 1
+   * doesn't discard older pages the user already loaded.
+   */
   onConversationsLoaded: (conversations: Conversation[]) => void;
   /**
    * Increment to force the fetch effect below to refire. The parent
    * bumps this on realtime reconnect / tab visibility → visible so the
    * list catches up on any events sent while the WS was disconnected
    * or the tab was throttled. Optional so existing callers keep working.
+   * Always refetches page 1 — a missed event is by definition recent, so
+   * older loaded pages don't need to be re-verified.
    */
   resyncToken?: number;
 }
@@ -85,6 +107,13 @@ export function ConversationList({
     onConversationsLoadedRef.current = onConversationsLoaded;
   });
 
+  // Cursor for "Load more" — the oldest `last_message_at` seen so far.
+  // Kept in a ref (not state) since it's only read inside the load-more
+  // callback, never rendered.
+  const cursorRef = useRef<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+
   useEffect(() => {
     const supabase = createClient();
     let cancelled = false;
@@ -93,7 +122,8 @@ export function ConversationList({
       const { data, error } = await supabase
         .from("conversations")
         .select(CONVERSATION_SELECT)
-        .order("last_message_at", { ascending: false });
+        .order("last_message_at", { ascending: false })
+        .limit(PAGE_SIZE);
 
       if (cancelled) return;
 
@@ -109,7 +139,19 @@ export function ConversationList({
         return;
       }
 
-      onConversationsLoadedRef.current(normalizeConversations(data ?? []));
+      const rows = data ?? [];
+      // A full page suggests there may be more; a short page is the
+      // definitive end of the list. This can occasionally under-report
+      // (exactly PAGE_SIZE remaining rows shows one harmless extra
+      // "Load more" click that then reports no more) but never loses data.
+      cursorRef.current =
+        rows.length > 0
+          ? (rows[rows.length - 1] as { last_message_at: string | null })
+              .last_message_at
+          : null;
+      setHasMore(rows.length === PAGE_SIZE);
+
+      onConversationsLoadedRef.current(normalizeConversations(rows));
       setLoading(false);
     })();
 
@@ -119,7 +161,50 @@ export function ConversationList({
     // `resyncToken` is included so the parent can force a refetch when
     // the realtime channel reconnects or the tab regains focus — catches
     // up on any events sent while the WS was disconnected or throttled.
+    // Resets pagination to page 1 — a resync is about catching up on
+    // recent events, not re-verifying pages the user already scrolled to.
   }, [resyncToken]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const supabase = createClient();
+      let query = supabase
+        .from("conversations")
+        .select(CONVERSATION_SELECT)
+        .order("last_message_at", { ascending: false })
+        .limit(PAGE_SIZE);
+      // No cursor (all loaded rows had a null last_message_at, which
+      // shouldn't happen in practice) — nothing further to page into.
+      if (cursorRef.current) {
+        query = query.lt("last_message_at", cursorRef.current);
+      } else {
+        setHasMore(false);
+        return;
+      }
+      const { data, error } = await query;
+      if (error) {
+        console.error("Failed to load more conversations:", {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code,
+        });
+        return;
+      }
+      const rows = data ?? [];
+      cursorRef.current =
+        rows.length > 0
+          ? (rows[rows.length - 1] as { last_message_at: string | null })
+              .last_message_at
+          : cursorRef.current;
+      setHasMore(rows.length === PAGE_SIZE);
+      onConversationsLoadedRef.current(normalizeConversations(rows));
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [hasMore, loadingMore]);
 
   // Tag definitions for the filter picker — loaded once so labels/colours
   // stay stable regardless of which conversations happen to be loaded.
@@ -410,6 +495,29 @@ export function ConversationList({
                 onSelect={handleSelect}
               />
             ))}
+          </div>
+        )}
+        {/* Only the most recent PAGE_SIZE conversations load up front
+            (issue: unbounded inbox load time as history accumulates).
+            Older ones are one click away rather than loaded eagerly. */}
+        {!loading && hasMore && (
+          <div className="p-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={loadMore}
+              disabled={loadingMore}
+              className="w-full border-border text-muted-foreground hover:bg-muted"
+            >
+              {loadingMore ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Loading…
+                </>
+              ) : (
+                "Load older conversations"
+              )}
+            </Button>
           </div>
         )}
       </ScrollArea>

@@ -61,6 +61,30 @@ const SECURITY_HEADERS = [
 ] as const;
 
 const nextConfig: NextConfig = {
+  // `sharp` is already on Next's built-in external-packages list, which
+  // is why image compression worked with no config here. `ffmpeg-static`
+  // isn't — left to the default Server Components bundler, its exported
+  // binary path resolves to a bogus `/ROOT/...` placeholder at runtime
+  // (Next's tracer rewrites `__dirname`-based paths for bundling, which
+  // breaks a package whose only job IS returning a real absolute path),
+  // and every video compression attempt fails with `spawn ... ENOENT`
+  // silently falling back to the uncompressed original. `fluent-ffmpeg`
+  // is excluded too since it's the thin wrapper that calls that path.
+  serverExternalPackages: ["ffmpeg-static", "fluent-ffmpeg"],
+  experimental: {
+    // This Next.js version buffers every request body that passes
+    // through `proxy`/`middleware.ts` (which every request does — see
+    // src/middleware.ts) so it can be read multiple times, capped at a
+    // 10 MB default. Past that cap the body is silently truncated —
+    // NOT rejected with an error — so an oversized request would
+    // process corrupted/partial data rather than fail loudly. Found
+    // while testing the outbound media-compression endpoint
+    // (POST /api/whatsapp/media/upload): the video cap is 16 MB
+    // (MEDIA_MAX_BYTES_BY_KIND.video), which exceeds the default. Set
+    // above every per-kind upload ceiling in the app with headroom for
+    // multipart/form-data overhead.
+    proxyClientMaxBodySize: "20mb",
+  },
   /**
    * Cache-Control policy.
    *

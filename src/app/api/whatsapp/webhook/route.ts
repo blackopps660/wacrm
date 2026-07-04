@@ -2,6 +2,7 @@ import { NextResponse, after } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
+import { compressImage, compressVideo } from '@/lib/storage/compress-media'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
@@ -356,14 +357,20 @@ async function handleStatusUpdate(status: {
   recipient_id: string
 }) {
   // 1) Mirror onto messages (legacy behavior) — Meta's status values
-  //    already match the CHECK constraint on messages.status. No
-  //    `.select()`: message_id is NOT unique (migration 009 — Meta ids
-  //    repeat across numbers), so this updates 0..N rows and must not
-  //    assume a single row.
-  const { error: msgErr } = await supabaseAdmin()
+  //    already match the CHECK constraint on messages.status.
+  //    `.select(...)` piggybacks the account-resolution read that used
+  //    to be its own separate round trip (previously step 3, below) —
+  //    an UPDATE...RETURNING gets both done in one query instead of two.
+  //    message_id is NOT unique (migration 009 — Meta ids repeat across
+  //    numbers), so this updates 0..N rows; `data` comes back as an
+  //    array and step 3 below picks `data[0]` — same "arbitrary one
+  //    row, purely to resolve the owning account" contract the old
+  //    separate `.limit(1).maybeSingle()` read had.
+  const { data: updatedMessages, error: msgErr } = await supabaseAdmin()
     .from('messages')
     .update({ status: status.status })
     .eq('message_id', status.id)
+    .select('conversation_id, conversations(account_id)')
 
   if (msgErr) {
     console.error('Error updating message status:', msgErr)
@@ -410,14 +417,11 @@ async function handleStatusUpdate(status: {
 
   // 3) Webhook fan-out for messages we store (inbox / API sends).
   //    Runs last so a slow subscriber can't delay the mirrors above.
-  //    Bounded to one row (message_id isn't unique) purely to resolve
-  //    the owning account for delivery.
-  const { data: msgRow } = await supabaseAdmin()
-    .from('messages')
-    .select('conversation_id, conversations(account_id)')
-    .eq('message_id', status.id)
-    .limit(1)
-    .maybeSingle()
+  //    Reuses the row(s) step 1's UPDATE already returned rather than
+  //    re-querying `messages` a second time — same "arbitrary first
+  //    row, purely to resolve the owning account" contract the old
+  //    separate read had.
+  const msgRow = updatedMessages?.[0]
 
   if (msgRow) {
     const conv = msgRow.conversations as { account_id: string } | null
@@ -611,8 +615,32 @@ async function processMessage(
     return
   }
 
+  // Idempotency guard — Meta's webhook delivery is documented
+  // at-least-once (it can redeliver the same message independent of how
+  // fast we ACK), and message.id (Meta's wamid) had no dedup check before
+  // this. A redelivery must not create a second `messages` row or re-run
+  // flows/automations/AI-auto-reply a second time for it. Scoped to this
+  // conversation rather than message.id alone — Meta ids aren't globally
+  // unique (see migration 009's comment: they repeat across numbers).
+  // A unique index on (conversation_id, message_id) (migration 033)
+  // backs this up as a safety net against a race between two concurrent
+  // redeliveries; this check is just what avoids the wasted media-verify
+  // call and insert attempt in the common (non-racing) case.
+  const { data: existingMsg } = await supabaseAdmin()
+    .from('messages')
+    .select('id')
+    .eq('conversation_id', conversation.id)
+    .eq('message_id', message.id)
+    .limit(1)
+    .maybeSingle()
+
+  if (existingMsg) {
+    console.warn('[webhook] duplicate inbound message ignored:', message.id)
+    return
+  }
+
   // Parse message content based on type
-  const { contentText, mediaUrl, mediaType, interactiveReplyId } =
+  const { contentText, mediaUrl, mediaType, cacheableMediaId, interactiveReplyId } =
     await parseMessageContent(message, accessToken)
 
   // Resolve swipe-reply context if present. A missing parent is fine —
@@ -635,10 +663,9 @@ async function processMessage(
   // (see supabase/migrations/001_initial_schema.sql):
   //   conversation_id, sender_type, content_type, content_text,
   //   media_url, template_name, message_id, status, created_at
-  // `mediaType` is intentionally unused — the schema has no media_type
-  // column; the MIME type is only used to construct the proxy URL during
-  // parseMessageContent. Silence the unused-var warning:
-  void mediaType
+  // `mediaType` isn't a column (the MIME type is only needed to build the
+  // proxy URL during parseMessageContent and, further down, to compress
+  // + cache the file) — it never goes into the INSERT below.
 
   // The messages.content_type CHECK constraint (widened in migration 010
   // to add 'interactive' for button/list taps) allows:
@@ -813,6 +840,81 @@ async function processMessage(
     content_type: contentType,
     text: contentText,
   })
+
+  // Download, compress, and cache the media LAST — after the message
+  // is already inserted and every event dispatched, so a slow-to-
+  // compress video never delays the message showing up in the inbox
+  // or the webhook fan-out above. Awaited (not fire-and-forget) for the
+  // same reason as the dispatch above: a detached promise inside
+  // `after()` risks the runtime freezing the function before it
+  // finishes (issue #301). `cacheInboundMedia` never throws — on any
+  // failure the message keeps working via the existing live-Meta-fetch
+  // proxy, just without the cache/compression benefit for this file.
+  if (cacheableMediaId && mediaType) {
+    await cacheInboundMedia({
+      mediaId: cacheableMediaId,
+      mimeType: mediaType,
+      accountId,
+      accessToken,
+    })
+  }
+}
+
+/**
+ * Download an inbound image/video from Meta once, compress it, and
+ * store the result in the private `inbound-media` bucket (migration
+ * 035) so the proxy route (`/api/whatsapp/media/[mediaId]`) can serve
+ * it from our own storage instead of re-fetching from Meta on every
+ * view. Best-effort: any failure just means this particular file keeps
+ * falling back to the pre-existing live-Meta-fetch path.
+ */
+async function cacheInboundMedia({
+  mediaId,
+  mimeType,
+  accountId,
+  accessToken,
+}: {
+  mediaId: string
+  mimeType: string
+  accountId: string
+  accessToken: string
+}): Promise<void> {
+  try {
+    const mediaInfo = await getMediaUrl({ mediaId, accessToken })
+    const { buffer, contentType } = await downloadMedia({
+      downloadUrl: mediaInfo.url,
+      accessToken,
+    })
+    const effectiveMime = mediaInfo.mimeType || contentType || mimeType
+
+    const compressed = effectiveMime.startsWith('image/')
+      ? await compressImage(buffer, effectiveMime)
+      : effectiveMime.startsWith('video/')
+        ? await compressVideo(buffer, effectiveMime)
+        : { buffer, mimeType: effectiveMime }
+
+    const ext = compressed.mimeType.split('/')[1]?.split(';')[0] || 'bin'
+    const path = `account-${accountId}/inbound/${mediaId}.${ext}`
+
+    const { error } = await supabaseAdmin()
+      .storage.from('inbound-media')
+      .upload(path, compressed.buffer, {
+        contentType: compressed.mimeType,
+        upsert: true,
+        // Meta's media id is immutable — once cached, this exact object
+        // never changes, so a long client cache lifetime is safe.
+        cacheControl: '31536000',
+      })
+    if (error) {
+      console.warn('[webhook] failed to cache inbound media:', mediaId, error.message)
+    }
+  } catch (err) {
+    console.warn(
+      '[webhook] cacheInboundMedia failed, proxy will fall back to Meta:',
+      mediaId,
+      err instanceof Error ? err.message : err,
+    )
+  }
 }
 
 async function parseMessageContent(
@@ -822,6 +924,14 @@ async function parseMessageContent(
   contentText: string | null
   mediaUrl: string | null
   mediaType: string | null
+  /**
+   * Meta's media id for image/video messages only (null for every
+   * other content type) — used after insert to kick off the
+   * download-compress-cache pass. Kept separate from `mediaUrl`
+   * (which is always the proxy path) so callers don't need to
+   * re-derive it from the message payload.
+   */
+  cacheableMediaId: string | null
   /**
    * For interactive button / list replies: the stable id of the tapped
    * option (whatever we put on the button when sending). Used by the
@@ -856,6 +966,7 @@ async function parseMessageContent(
     contentText: null,
     mediaUrl: null,
     mediaType: null,
+    cacheableMediaId: null,
     interactiveReplyId: null,
   }
 
@@ -865,22 +976,26 @@ async function parseMessageContent(
 
     case 'image':
       if (message.image?.id) {
+        const mediaUrl = await verifyAndBuildUrl(message.image.id)
         return {
           ...empty,
           contentText: message.image.caption || null,
-          mediaUrl: await verifyAndBuildUrl(message.image.id),
+          mediaUrl,
           mediaType: message.image.mime_type,
+          cacheableMediaId: mediaUrl ? message.image.id : null,
         }
       }
       return empty
 
     case 'video':
       if (message.video?.id) {
+        const mediaUrl = await verifyAndBuildUrl(message.video.id)
         return {
           ...empty,
           contentText: message.video.caption || null,
-          mediaUrl: await verifyAndBuildUrl(message.video.id),
+          mediaUrl,
           mediaType: message.video.mime_type,
+          cacheableMediaId: mediaUrl ? message.video.id : null,
         }
       }
       return empty

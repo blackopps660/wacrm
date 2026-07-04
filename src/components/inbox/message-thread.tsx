@@ -1,6 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { usePresence } from "@/hooks/use-presence";
@@ -37,6 +44,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
+import { Loader2 } from "lucide-react";
 import { MessageBubble } from "./message-bubble";
 import { MessageActions } from "./message-actions";
 import {
@@ -150,6 +159,12 @@ const STATUS_OPTIONS: { label: string; value: ConversationStatus; color: string 
 const DOODLE_BG_CLASSES =
   "bg-background bg-[url('/inbox-doodle.svg')] bg-repeat";
 
+// A long-lived thread (an active customer over months) can accumulate
+// thousands of messages; loading every one of them on every open gets
+// slower as history grows. Only the most recent page loads up front —
+// older messages are one "Load older messages" click away.
+const PAGE_SIZE = 50;
+
 export function MessageThread({
   conversation,
   contact,
@@ -169,6 +184,21 @@ export function MessageThread({
   const { getPresence, getRow, now } = usePresence();
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Pagination — oldest loaded message's created_at (cursor for "load
+  // older"), whether an older page might still exist, and the in-flight
+  // flag for the button. All reset whenever the conversation changes.
+  const oldestCursorRef = useRef<string | null>(null);
+  const [hasMoreOlder, setHasMoreOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  // Coordinates the two scroll effects below: set right before a "load
+  // older" fetch so the auto-scroll-to-bottom effect skips its usual
+  // jump, and paired with `prevScrollHeightRef` so the layout effect can
+  // compensate scrollTop for the height the prepended messages just
+  // added — without this the browser keeps scrollTop pinned to the same
+  // pixel offset, which visually yanks the view to a different point in
+  // the (now taller) thread.
+  const skipAutoScrollRef = useRef(false);
+  const prevScrollHeightRef = useRef<number | null>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
@@ -271,21 +301,37 @@ export function MessageThread({
     const supabase = createClient();
     let cancelled = false;
 
+    // New conversation (or a resync) — pagination starts fresh from the
+    // most recent page. A resync only re-verifies page 1; it doesn't
+    // need to re-check "load older" pages already fetched.
+    oldestCursorRef.current = null;
+    setHasMoreOlder(false);
+
     (async () => {
       setLoading(true);
 
+      // Newest-first + limit, then reverse to the ascending order the
+      // UI renders in — this is what actually bounds the query; fetching
+      // ascending with a limit would return the OLDEST page instead.
       const { data, error } = await supabase
         .from("messages")
         .select("*")
         .eq("conversation_id", conversationId)
-        .order("created_at", { ascending: true });
+        .order("created_at", { ascending: false })
+        .limit(PAGE_SIZE);
 
       if (cancelled) return;
 
       if (error) {
         console.error("Failed to fetch messages:", error);
       } else {
-        onMessagesLoadedRef.current(data ?? []);
+        const rows = data ?? [];
+        // `rows` is newest-first; the last entry is the oldest in this
+        // page and becomes the cursor for "load older".
+        oldestCursorRef.current =
+          rows.length > 0 ? rows[rows.length - 1].created_at : null;
+        setHasMoreOlder(rows.length === PAGE_SIZE);
+        onMessagesLoadedRef.current(rows.slice().reverse());
       }
 
       if (!cancelled) setLoading(false);
@@ -299,6 +345,47 @@ export function MessageThread({
     // realtime is best-effort and any message events sent while the WS
     // was disconnected or throttled are otherwise lost.
   }, [conversationId, resyncToken]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!conversationId || loadingOlder || !hasMoreOlder) return;
+    const cursor = oldestCursorRef.current;
+    if (!cursor) {
+      setHasMoreOlder(false);
+      return;
+    }
+
+    setLoadingOlder(true);
+    // Tell the auto-scroll-to-bottom effect to sit this one out, and
+    // snapshot the current scroll height so the layout effect below can
+    // compensate once the older messages are prepended.
+    skipAutoScrollRef.current = true;
+    prevScrollHeightRef.current = scrollRef.current?.scrollHeight ?? null;
+
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("messages")
+        .select("*")
+        .eq("conversation_id", conversationId)
+        .lt("created_at", cursor)
+        .order("created_at", { ascending: false })
+        .limit(PAGE_SIZE);
+
+      if (error) {
+        console.error("Failed to load older messages:", error);
+        return;
+      }
+
+      const rows = data ?? [];
+      if (rows.length > 0) {
+        oldestCursorRef.current = rows[rows.length - 1].created_at;
+      }
+      setHasMoreOlder(rows.length === PAGE_SIZE);
+      onMessagesLoadedRef.current(rows.slice().reverse());
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [conversationId, loadingOlder, hasMoreOlder]);
 
   // Reactions fetch — pulls the current state from the DB. Kept separate
   // from the channel subscription below so a `resyncToken` bump just
@@ -430,8 +517,28 @@ export function MessageThread({
       });
   }, [conversationId, hasUnread]);
 
-  // Auto-scroll to bottom on new messages
+  // Restores scroll position after "Load older messages" prepends rows —
+  // must run as a layout effect (before paint) so the user never sees the
+  // un-compensated jump. Runs first (declaration order) so the auto-
+  // scroll-to-bottom effect below sees `skipAutoScrollRef` already
+  // consumed... actually it clears its own flag independently; order
+  // between the two doesn't matter since each guards on its own ref.
+  useLayoutEffect(() => {
+    if (prevScrollHeightRef.current !== null && scrollRef.current) {
+      const el = scrollRef.current;
+      el.scrollTop = el.scrollHeight - prevScrollHeightRef.current;
+      prevScrollHeightRef.current = null;
+    }
+  }, [messages]);
+
+  // Auto-scroll to bottom on new messages. Skipped once after a "load
+  // older" fetch — that prepend already had its scroll position handled
+  // by the layout effect above; jumping to the bottom here would undo it.
   useEffect(() => {
+    if (skipAutoScrollRef.current) {
+      skipAutoScrollRef.current = false;
+      return;
+    }
     if (scrollRef.current) {
       const el = scrollRef.current;
       el.scrollTop = el.scrollHeight;
@@ -1012,6 +1119,26 @@ export function MessageThread({
           </div>
         ) : (
           <div className="space-y-4">
+            {hasMoreOlder && (
+              <div className="flex justify-center pb-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={loadOlderMessages}
+                  disabled={loadingOlder}
+                  className="border-border text-muted-foreground hover:bg-muted"
+                >
+                  {loadingOlder ? (
+                    <>
+                      <Loader2 className="size-3.5 animate-spin" />
+                      Loading…
+                    </>
+                  ) : (
+                    "Load older messages"
+                  )}
+                </Button>
+              </div>
+            )}
             {messageGroups.map((group) => (
               <div key={group.date}>
                 {/* Date separator */}

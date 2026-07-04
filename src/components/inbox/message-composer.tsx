@@ -270,6 +270,13 @@ export function MessageComposer({
   }, [drafting, conversationId, adjustHeight]);
 
   // Upload a captured file to chat-media and stage it as a draft.
+  //
+  // Image/video go through the server-side compressing endpoint
+  // (sharp/ffmpeg only run in Node, not the browser) so outbound media
+  // gets the same size/bandwidth win as inbound. Documents skip
+  // compression entirely (nothing to compress) and keep uploading
+  // straight from the browser — one fewer hop for the common "send a
+  // PDF" case.
   const stageUpload = useCallback(
     async (kind: ComposerMediaKind, file: File) => {
       // Per-kind ceiling mirrors Meta's caps (image 5 MB, etc.) so we
@@ -286,7 +293,23 @@ export function MessageComposer({
       }
       setBusy(true);
       try {
-        const { publicUrl, path } = await uploadAccountMedia(CHAT_MEDIA_BUCKET, file);
+        let publicUrl: string;
+        let path: string;
+        if (kind === "image" || kind === "video") {
+          const formData = new FormData();
+          formData.append("file", file);
+          formData.append("kind", kind);
+          const res = await fetch("/api/whatsapp/media/upload", {
+            method: "POST",
+            body: formData,
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || "Upload failed.");
+          publicUrl = data.publicUrl;
+          path = data.path;
+        } else {
+          ({ publicUrl, path } = await uploadAccountMedia(CHAT_MEDIA_BUCKET, file));
+        }
         // Replacing an existing draft? GC the previous object first.
         removeStaged(draftRef.current?.path);
         setDraft({ kind, mediaUrl: publicUrl, path, filename: file.name, caption: "" });
@@ -550,10 +573,6 @@ export function MessageComposer({
                 <FileText className="mr-2 h-4 w-4" />
                 Document
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void startRecording()}>
-                <Mic className="mr-2 h-4 w-4" />
-                Voice note
-              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
 
@@ -610,16 +629,34 @@ export function MessageComposer({
             )}
           />
 
-          <GatedButton
-            size="sm"
-            canAct={!readOnly}
-            gateReason="send messages"
-            disabled={!text.trim() || sessionExpired || sending}
-            onClick={handleSend}
-            className="h-9 w-9 shrink-0 bg-primary p-0 hover:bg-primary/90 disabled:opacity-40"
-          >
-            <Send className="h-4 w-4" />
-          </GatedButton>
+          {/* WhatsApp-style toggle: mic when the composer is empty, send
+              once there's text to send. Voice notes go through the same
+              record → upload → attach-as-draft flow as the old "Attach"
+              menu entry (removed above — one discoverable entry point). */}
+          {text.trim() ? (
+            <GatedButton
+              size="sm"
+              canAct={!readOnly}
+              gateReason="send messages"
+              disabled={sessionExpired || sending}
+              onClick={handleSend}
+              className="h-9 w-9 shrink-0 bg-primary p-0 hover:bg-primary/90 disabled:opacity-40"
+            >
+              <Send className="h-4 w-4" />
+            </GatedButton>
+          ) : (
+            <GatedButton
+              size="sm"
+              canAct={!readOnly}
+              gateReason="send messages"
+              disabled={inputsDisabled || busy}
+              onClick={() => void startRecording()}
+              title={readOnly ? undefined : "Record a voice note"}
+              className="h-9 w-9 shrink-0 bg-primary p-0 hover:bg-primary/90 disabled:opacity-40"
+            >
+              <Mic className="h-4 w-4" />
+            </GatedButton>
+          )}
         </div>
       )}
 

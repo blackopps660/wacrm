@@ -387,51 +387,106 @@ export default function InboxPage() {
     setResyncToken((n) => n + 1);
   }, []);
 
+  // Sort helper for merges below — newest first, matching the DB order
+  // the conversation list fetches in. Extracted since three call sites
+  // need it (page-1 merge, load-more merge, deep-link insert).
+  const sortByLastMessage = useCallback((list: Conversation[]) => {
+    return [...list].sort((a, b) => {
+      const at = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+      const bt = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+      return bt - at;
+    });
+  }, []);
+
+  // Fires for every conversation batch the list fetches — the first page
+  // (mount / resync) and each "Load more" page alike. Merges by id
+  // instead of replacing outright: a resync only re-fetches page 1, so a
+  // blind replace would discard any older pages the user already loaded
+  // via "Load more". Re-sorting after the merge keeps ordering correct
+  // regardless of which batch just arrived.
   const handleConversationsLoaded = useCallback(
     (loaded: Conversation[]) => {
-      setConversations(loaded);
-      // Resolve a pending deep-link here rather than in an effect — this
-      // is an event handler, so the setState calls below are allowed by
-      // react-hooks/set-state-in-effect. Runs once per ?c=<id> URL value
-      // via the ref, so realtime refreshes of the list can't snap the
-      // user back to the deep-linked thread after they've navigated.
-      if (
-        deepLinkConvId &&
-        autoSelectedForDeepLinkRef.current !== deepLinkConvId &&
-        loaded.length > 0
-      ) {
-        autoSelectedForDeepLinkRef.current = deepLinkConvId;
-        // If the deep-linked conversation is already the active one
-        // (e.g. because the user clicked it in the list and we
-        // router.replace()'d the URL, which made the ConversationList
-        // refetch and land us back here), do NOT re-apply it. Doing so
-        // would setMessages([]) on a thread whose messages have
-        // already been loaded by MessageThread — and because
-        // conversationId didn't change, MessageThread wouldn't
-        // refetch. The thread would read "No messages yet" until a
-        // full page reload rehydrated state from scratch.
-        if (activeConversation?.id === deepLinkConvId) return;
-        const match = loaded.find((c) => c.id === deepLinkConvId);
-        if (match) {
-          setActiveConversation(match);
-          setActiveContact(match.contact ?? null);
-          setMessages([]);
-          // Mirror the optimistic unread reset that handleSelectConversation
-          // does — the user just deep-linked into this conv, treat that the
-          // same as a click. Leaves activeConversation.unread_count alone so
-          // the MessageThread reset effect still fires the server UPDATE.
-          if (match.unread_count > 0) {
-            setConversations((prev) =>
-              prev.map((c) =>
-                c.id === match.id ? { ...c, unread_count: 0 } : c,
-              ),
-            );
-          }
+      setConversations((prev) => {
+        const byId = new Map(prev.map((c) => [c.id, c]));
+        for (const conv of loaded) {
+          // Suppress a stale non-zero unread_count for the conversation
+          // the user is actively viewing — same reasoning as the realtime
+          // UPDATE handler above (avoids a flicker while the server-side
+          // reset round-trips).
+          const isActive = activeConversation?.id === conv.id;
+          byId.set(conv.id, isActive ? { ...conv, unread_count: 0 } : conv);
         }
-      }
+        return sortByLastMessage(Array.from(byId.values()));
+      });
     },
-    [deepLinkConvId, activeConversation?.id]
+    [activeConversation?.id, sortByLastMessage],
   );
+
+  // Resolve `?c=<id>` deep links by a direct point-fetch rather than
+  // waiting for it to appear in the (now paginated) conversation list —
+  // a link to an older conversation may be several "Load more" pages
+  // back and would otherwise never auto-select. Runs once per URL value
+  // via the ref, so realtime/pagination refreshes can't snap the user
+  // back to the deep-linked thread after they've navigated elsewhere.
+  useEffect(() => {
+    if (!deepLinkConvId) return;
+    if (autoSelectedForDeepLinkRef.current === deepLinkConvId) return;
+    // Already viewing it (e.g. the user clicked it and we router.replace()'d
+    // the URL ourselves) — mark resolved without re-applying. Re-applying
+    // would setMessages([]) on a thread MessageThread already loaded, and
+    // since conversationId wouldn't change, it wouldn't refetch — the
+    // thread would read "No messages yet" until a full reload.
+    if (activeConversation?.id === deepLinkConvId) {
+      autoSelectedForDeepLinkRef.current = deepLinkConvId;
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("conversations")
+        .select(CONVERSATION_SELECT)
+        .eq("id", deepLinkConvId)
+        .maybeSingle();
+
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to resolve deep-linked conversation:", {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code,
+        });
+        return;
+      }
+      if (!data) return;
+
+      autoSelectedForDeepLinkRef.current = deepLinkConvId;
+      const match = normalizeConversation(data);
+      setConversations((prev) => {
+        if (prev.some((c) => c.id === match.id)) return prev;
+        return sortByLastMessage([match, ...prev]);
+      });
+      setActiveConversation(match);
+      setActiveContact(match.contact ?? null);
+      setMessages([]);
+      // Mirror the optimistic unread reset that handleSelectConversation
+      // does — the user just deep-linked into this conv, treat that the
+      // same as a click. Leaves match.unread_count alone in
+      // activeConversation so the MessageThread reset effect still fires
+      // the server UPDATE.
+      if (match.unread_count > 0) {
+        setConversations((prev) =>
+          prev.map((c) => (c.id === match.id ? { ...c, unread_count: 0 } : c)),
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [deepLinkConvId, activeConversation?.id, sortByLastMessage]);
 
   const handleSelectConversation = useCallback(
     (conv: Conversation) => {
@@ -489,8 +544,19 @@ export default function InboxPage() {
   }, [router]);
 
 
+  // Fires for every message batch the thread fetches — the first page
+  // (open / resync) and each "Load older messages" page alike. Merges by
+  // id and re-sorts by created_at rather than replacing outright: a
+  // resync only re-fetches the newest page, so a blind replace would
+  // discard any older pages the user already loaded via "Load older".
   const handleMessagesLoaded = useCallback((loaded: Message[]) => {
-    setMessages(loaded);
+    setMessages((prev) => {
+      const byId = new Map(prev.map((m) => [m.id, m]));
+      for (const msg of loaded) byId.set(msg.id, msg);
+      return Array.from(byId.values()).sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+      );
+    });
   }, []);
 
   const handleNewMessage = useCallback((msg: Message) => {

@@ -48,6 +48,7 @@ it. Grant the minimum.
 | `contacts:read`      | List and read contacts                   |
 | `contacts:write`     | Create and update contacts               |
 | `conversations:read` | List and read conversations              |
+| `conversations:write`| Update conversation status; mark read/unread |
 | `broadcasts:send`    | Launch broadcast campaigns               |
 | `webhooks:manage`    | Register and manage outbound webhooks    |
 
@@ -206,10 +207,15 @@ List conversations, newest first. Scope: `conversations:read`.
 Paginated. Optional filters: `?status=` (`open` / `pending` / `closed`)
 and `?contact_id=`. Each conversation embeds its contact + tags.
 
-### `GET /api/v1/conversations/{id}`
+### `GET` / `PATCH /api/v1/conversations/{id}`
 
-Read one conversation. Scope: `conversations:read`. `404` if it belongs
-to another account.
+`GET` reads one conversation. Scope: `conversations:read`. `404` if it
+belongs to another account.
+
+`PATCH` updates `status` (`open` / `pending` / `closed`) and/or
+`unread_count` — pass whichever fields you're changing, e.g.
+`{ "unread_count": 0 }` to mark a conversation read after a client
+(such as a separate mobile app) opens it. Scope: `conversations:write`.
 
 ### `GET /api/v1/conversations/{id}/messages`
 
