@@ -64,6 +64,8 @@ export function AiConfig() {
   const [isActive, setIsActive] = useState(false);
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
   const [maxPerConversation, setMaxPerConversation] = useState(3);
+  const [defaultNewConversationOwner, setDefaultNewConversationOwner] =
+    useState<'ai' | 'human'>('human');
 
   // Guard keyed on the account (not a bare boolean) so an in-place
   // account switch — ownership transfer, multi-account membership —
@@ -88,6 +90,9 @@ export function AiConfig() {
         setIsActive(data.is_active);
         setAutoReplyEnabled(data.auto_reply_enabled);
         setMaxPerConversation(data.auto_reply_max_per_conversation ?? 3);
+        setDefaultNewConversationOwner(
+          data.default_new_conversation_owner === 'ai' ? 'ai' : 'human',
+        );
         setHasStoredKey(Boolean(data.has_key));
         setApiKey(data.has_key ? MASKED_KEY : '');
         setKeyEdited(false);
@@ -134,6 +139,7 @@ export function AiConfig() {
     is_active: isActive,
     auto_reply_enabled: autoReplyEnabled,
     auto_reply_max_per_conversation: maxPerConversation,
+    default_new_conversation_owner: defaultNewConversationOwner,
   });
 
   const handleTest = async () => {
@@ -201,6 +207,7 @@ export function AiConfig() {
         setIsActive(false);
         setAutoReplyEnabled(false);
         setSystemPrompt('');
+        setDefaultNewConversationOwner('human');
       } else {
         const data = await res.json();
         toast.error(data.error ?? 'Failed to remove.');
@@ -421,6 +428,36 @@ export function AiConfig() {
                 disabled={disabled || !isActive}
               />
             </div>
+
+            {autoReplyEnabled && (
+              <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">
+                    New conversations go to
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    When a new contact messages in (or a closed conversation
+                    reopens), route it here by default. An agent can always
+                    take over from the inbox afterwards.
+                  </p>
+                </div>
+                <Select
+                  value={defaultNewConversationOwner}
+                  onValueChange={(v) =>
+                    setDefaultNewConversationOwner(v as 'ai' | 'human')
+                  }
+                  disabled={disabled}
+                >
+                  <SelectTrigger className="w-32">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="human">Agent</SelectItem>
+                    <SelectItem value="ai">AI agent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="flex items-center justify-between gap-4">
               <div>
