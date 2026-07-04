@@ -91,9 +91,14 @@ export async function POST(request: Request) {
     const isActive = body.is_active === true
     const autoReplyEnabled = body.auto_reply_enabled === true
 
-    let maxPer = Number(body.auto_reply_max_per_conversation)
-    if (!Number.isFinite(maxPer)) maxPer = 3
-    maxPer = Math.min(20, Math.max(1, Math.floor(maxPer)))
+    // null (explicit, or anything non-numeric) means "no cap" — the bot
+    // keeps auto-replying indefinitely. A numeric value has no upper
+    // bound anymore either; only a lower bound of 1 makes sense.
+    let maxPer: number | null = null
+    if (body.auto_reply_max_per_conversation !== null) {
+      const n = Number(body.auto_reply_max_per_conversation)
+      maxPer = Number.isFinite(n) ? Math.max(1, Math.floor(n)) : null
+    }
 
     const defaultNewConversationOwner =
       body.default_new_conversation_owner === 'ai' ? 'ai' : 'human'

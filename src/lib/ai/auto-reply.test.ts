@@ -188,6 +188,23 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
     expect(h.engineSendText).not.toHaveBeenCalled()
   })
 
+  it('never caps when the per-conversation limit is unlimited (null)', async () => {
+    h.loadAiConfig.mockResolvedValue(aiConfig({ autoReplyMaxPerConversation: null }))
+    h.state.conv = {
+      owner_kind: 'ai',
+      ai_autoreply_disabled: false,
+      ai_reply_count: 9999,
+    }
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.state.rpcCalls).toEqual([
+      {
+        name: 'claim_ai_reply_slot',
+        args: { conversation_id: 'conv-1', max_replies: null },
+      },
+    ])
+    expect(h.engineSendText).toHaveBeenCalled()
+  })
+
   it('skips when there is nothing to reply to', async () => {
     h.buildConversationContext.mockResolvedValue([])
     await dispatchInboundToAiReply(ARGS)

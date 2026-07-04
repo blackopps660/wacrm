@@ -76,8 +76,13 @@ export async function dispatchInboundToAiReply(
     if (conv.owner_kind !== 'ai') return // not this bot's conversation
     if (conv.ai_autoreply_disabled) return // handed off / turned off here
     // Cheap early-out; the authoritative cap check is the atomic claim
-    // below (this read can race a concurrent inbound).
-    if (conv.ai_reply_count >= config.autoReplyMaxPerConversation) return
+    // below (this read can race a concurrent inbound). A null cap means
+    // no limit — the bot keeps replying indefinitely.
+    if (
+      config.autoReplyMaxPerConversation !== null &&
+      conv.ai_reply_count >= config.autoReplyMaxPerConversation
+    )
+      return
 
     const messages = await buildConversationContext(db, conversationId)
     if (messages.length === 0) return

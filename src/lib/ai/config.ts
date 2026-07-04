@@ -9,7 +9,7 @@ interface AiConfigRow {
   system_prompt: string | null
   is_active: boolean
   auto_reply_enabled: boolean
-  auto_reply_max_per_conversation: number
+  auto_reply_max_per_conversation: number | null
   embeddings_api_key: string | null
   default_new_conversation_owner: 'ai' | 'human'
 }

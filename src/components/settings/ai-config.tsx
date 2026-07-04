@@ -63,7 +63,8 @@ export function AiConfig() {
   const [systemPrompt, setSystemPrompt] = useState('');
   const [isActive, setIsActive] = useState(false);
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
-  const [maxPerConversation, setMaxPerConversation] = useState(3);
+  // null = unlimited (no per-conversation cap).
+  const [maxPerConversation, setMaxPerConversation] = useState<number | null>(3);
   const [defaultNewConversationOwner, setDefaultNewConversationOwner] =
     useState<'ai' | 'human'>('human');
 
@@ -89,7 +90,13 @@ export function AiConfig() {
         setSystemPrompt(data.system_prompt ?? '');
         setIsActive(data.is_active);
         setAutoReplyEnabled(data.auto_reply_enabled);
-        setMaxPerConversation(data.auto_reply_max_per_conversation ?? 3);
+        // A stored NULL is the deliberate "unlimited" state — keep it as
+        // null rather than defaulting it back to a number.
+        setMaxPerConversation(
+          typeof data.auto_reply_max_per_conversation === 'number'
+            ? data.auto_reply_max_per_conversation
+            : null,
+        );
         setDefaultNewConversationOwner(
           data.default_new_conversation_owner === 'ai' ? 'ai' : 'human',
         );
@@ -463,23 +470,35 @@ export function AiConfig() {
               <div>
                 <Label htmlFor="ai-max">Max auto-replies per conversation</Label>
                 <p className="text-xs text-muted-foreground">
-                  After this many bot replies in one thread, the bot goes quiet.
+                  {maxPerConversation === null
+                    ? 'Unlimited — the bot keeps replying for as long as the conversation needs.'
+                    : 'After this many bot replies in one thread, the bot goes quiet.'}
                 </p>
               </div>
-              <Input
-                id="ai-max"
-                type="number"
-                min={1}
-                max={20}
-                value={maxPerConversation}
-                onChange={(e) =>
-                  setMaxPerConversation(
-                    Math.min(20, Math.max(1, Number(e.target.value) || 1)),
-                  )
-                }
-                disabled={disabled || !autoReplyEnabled}
-                className="w-20"
-              />
+              <div className="flex items-center gap-3">
+                <Input
+                  id="ai-max"
+                  type="number"
+                  min={1}
+                  value={maxPerConversation ?? ''}
+                  placeholder="Unlimited"
+                  onChange={(e) =>
+                    setMaxPerConversation(Math.max(1, Number(e.target.value) || 1))
+                  }
+                  disabled={disabled || !autoReplyEnabled || maxPerConversation === null}
+                  className="w-20"
+                />
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Switch
+                    checked={maxPerConversation === null}
+                    onCheckedChange={(checked) =>
+                      setMaxPerConversation(checked ? null : 3)
+                    }
+                    disabled={disabled || !autoReplyEnabled}
+                  />
+                  Unlimited
+                </label>
+              </div>
             </div>
           </CardContent>
         </Card>

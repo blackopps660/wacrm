@@ -20,7 +20,8 @@ export interface AiConfig {
   systemPrompt: string | null
   isActive: boolean
   autoReplyEnabled: boolean
-  autoReplyMaxPerConversation: number
+  /** NULL means no cap — the bot keeps replying indefinitely. */
+  autoReplyMaxPerConversation: number | null
   /** What a brand-new (or reopened-from-closed) conversation is routed
    *  to by default — see migration 037. */
   defaultNewConversationOwner: 'ai' | 'human'
