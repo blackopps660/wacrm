@@ -8,6 +8,7 @@ import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit
 import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
 import { validateAiCredentials } from '@/lib/ai/validate'
 import { embedTexts } from '@/lib/ai/embeddings'
+import { normalizeActions } from '@/lib/ai/config'
 import { AiError, type AiProvider } from '@/lib/ai/types'
 
 function bad(message: string) {
@@ -30,7 +31,7 @@ export async function GET() {
       // `api_key` is selected only to derive `has_key` — it is stripped
       // out below and never returned to the client.
       .select(
-        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, default_new_conversation_owner, api_key, embeddings_api_key',
+        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, default_new_conversation_owner, actions, api_key, embeddings_api_key',
       )
       .eq('account_id', accountId)
       .maybeSingle()
@@ -52,6 +53,9 @@ export async function GET() {
       has_key: !!api_key,
       has_embeddings_key: !!embeddings_api_key,
       ...safe,
+      // Normalized so the settings form never has to guess at a
+      // missing key / malformed shape from a manual DB edit.
+      actions: normalizeActions(data.actions),
     })
   } catch (err) {
     return toErrorResponse(err)
@@ -102,6 +106,11 @@ export async function POST(request: Request) {
 
     const defaultNewConversationOwner =
       body.default_new_conversation_owner === 'ai' ? 'ai' : 'human'
+
+    // Re-normalized on the way in too, not just on the way out — a
+    // malformed `actions` blob from a non-standard client just becomes
+    // "everything disabled" rather than a 500 or a stored garbage value.
+    const actions = normalizeActions(body.actions)
 
     const rawKey = typeof body.api_key === 'string' ? body.api_key.trim() : ''
 
@@ -156,6 +165,12 @@ export async function POST(request: Request) {
           autoReplyMaxPerConversation: maxPer,
           embeddingsApiKey: null,
           defaultNewConversationOwner,
+          // Irrelevant to a connectivity check — placeholder only.
+          actions: {
+            updateTags: { enabled: false, guidelines: null },
+            updateContactFields: { enabled: false, guidelines: null },
+            triggerAutomations: { enabled: false, guidelines: null },
+          },
         })
       } catch (err) {
         if (err instanceof AiError) {
@@ -195,6 +210,7 @@ export async function POST(request: Request) {
       auto_reply_enabled: autoReplyEnabled,
       auto_reply_max_per_conversation: maxPer,
       default_new_conversation_owner: defaultNewConversationOwner,
+      actions,
     }
     if (rawEmbeddingsKey) {
       shared.embeddings_api_key = encrypt(rawEmbeddingsKey)

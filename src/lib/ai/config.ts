@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { decrypt } from '@/lib/whatsapp/encryption'
-import type { AiConfig } from './types'
+import type { AiActionSetting, AiActionsConfig, AiConfig } from './types'
 
 interface AiConfigRow {
   provider: 'openai' | 'anthropic'
@@ -12,10 +12,41 @@ interface AiConfigRow {
   auto_reply_max_per_conversation: number | null
   embeddings_api_key: string | null
   default_new_conversation_owner: 'ai' | 'human'
+  actions: unknown
 }
 
 const CONFIG_COLUMNS =
-  'provider, model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, embeddings_api_key, default_new_conversation_owner'
+  'provider, model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, embeddings_api_key, default_new_conversation_owner, actions'
+
+function normalizeActionSetting(raw: unknown): AiActionSetting {
+  const obj = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  return {
+    enabled: obj.enabled === true,
+    guidelines:
+      typeof obj.guidelines === 'string' && obj.guidelines.trim()
+        ? obj.guidelines.trim()
+        : null,
+  }
+}
+
+/** Defensive parse of the `actions` JSONB blob — a missing key, a
+ *  malformed row from manual DB edits, or a brand-new account with no
+ *  row at all all resolve to "every action disabled" rather than
+ *  throwing. */
+export function normalizeActions(raw: unknown): AiActionsConfig {
+  const obj = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  return {
+    updateTags: normalizeActionSetting(obj.updateTags),
+    updateContactFields: normalizeActionSetting(obj.updateContactFields),
+    triggerAutomations: normalizeActionSetting(obj.triggerAutomations),
+  }
+}
+
+/** True when at least one agent action is toggled on — used to decide
+ *  whether the system prompt needs the tool-usage guardrail line. */
+export function hasAnyActionEnabled(actions: AiActionsConfig): boolean {
+  return actions.updateTags.enabled || actions.updateContactFields.enabled || actions.triggerAutomations.enabled
+}
 
 /**
  * Load and decrypt the account's AI config for *use* (draft or
@@ -79,6 +110,7 @@ export async function loadAiConfig(
     autoReplyMaxPerConversation: row.auto_reply_max_per_conversation,
     embeddingsApiKey,
     defaultNewConversationOwner: row.default_new_conversation_owner,
+    actions: normalizeActions(row.actions),
   }
 }
 

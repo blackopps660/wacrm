@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Loader2, Sparkles, CheckCircle2, Trash2, Eye, EyeOff } from 'lucide-react';
+import { Loader2, Sparkles, CheckCircle2, Trash2, Eye, EyeOff, Zap } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { canEditSettings } from '@/lib/auth/roles';
 import { Button } from '@/components/ui/button';
@@ -27,7 +27,30 @@ import {
 import { SettingsPanelHead } from './settings-panel-head';
 import { AiKnowledgeCard } from './ai-knowledge';
 import { AI_PROVIDER_DEFAULT_MODEL } from '@/lib/ai/defaults';
-import type { AiProvider } from '@/lib/ai/types';
+import type { AiActionSetting, AiActionsConfig, AiProvider } from '@/lib/ai/types';
+
+const DISABLED_ACTIONS: AiActionsConfig = {
+  updateTags: { enabled: false, guidelines: null },
+  updateContactFields: { enabled: false, guidelines: null },
+  triggerAutomations: { enabled: false, guidelines: null },
+};
+
+function normalizeActionSetting(raw: unknown): AiActionSetting {
+  const obj = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  return {
+    enabled: obj.enabled === true,
+    guidelines: typeof obj.guidelines === 'string' ? obj.guidelines : null,
+  };
+}
+
+function normalizeActionsFromResponse(raw: unknown): AiActionsConfig {
+  const obj = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  return {
+    updateTags: normalizeActionSetting(obj.updateTags),
+    updateContactFields: normalizeActionSetting(obj.updateContactFields),
+    triggerAutomations: normalizeActionSetting(obj.triggerAutomations),
+  };
+}
 
 const MASKED_KEY = '••••••••••••••••';
 
@@ -67,6 +90,7 @@ export function AiConfig() {
   const [maxPerConversation, setMaxPerConversation] = useState<number | null>(3);
   const [defaultNewConversationOwner, setDefaultNewConversationOwner] =
     useState<'ai' | 'human'>('human');
+  const [actions, setActions] = useState<AiActionsConfig>(DISABLED_ACTIONS);
 
   // Guard keyed on the account (not a bare boolean) so an in-place
   // account switch — ownership transfer, multi-account membership —
@@ -100,6 +124,7 @@ export function AiConfig() {
         setDefaultNewConversationOwner(
           data.default_new_conversation_owner === 'ai' ? 'ai' : 'human',
         );
+        setActions(normalizeActionsFromResponse(data.actions));
         setHasStoredKey(Boolean(data.has_key));
         setApiKey(data.has_key ? MASKED_KEY : '');
         setKeyEdited(false);
@@ -147,6 +172,7 @@ export function AiConfig() {
     auto_reply_enabled: autoReplyEnabled,
     auto_reply_max_per_conversation: maxPerConversation,
     default_new_conversation_owner: defaultNewConversationOwner,
+    actions,
   });
 
   const handleTest = async () => {
@@ -215,6 +241,7 @@ export function AiConfig() {
         setAutoReplyEnabled(false);
         setSystemPrompt('');
         setDefaultNewConversationOwner('human');
+        setActions(DISABLED_ACTIONS);
       } else {
         const data = await res.json();
         toast.error(data.error ?? 'Failed to remove.');
@@ -503,6 +530,50 @@ export function AiConfig() {
           </CardContent>
         </Card>
 
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Zap className="h-4 w-4 text-primary" /> Actions
+            </CardTitle>
+            <CardDescription>
+              Let the agent do more than reply with text. Each action is off by
+              default — turn one on and describe when to use it in plain
+              language; the agent only ever acts on tags/fields/automations
+              that already exist.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <ActionSettingRow
+              title="Update tags"
+              description="Add or remove existing tags on the contact based on the conversation."
+              setting={actions.updateTags}
+              onChange={(next) => setActions((a) => ({ ...a, updateTags: next }))}
+              guidelinesPlaceholder="e.g. Tag as Hot Lead when they ask about pricing or say they want to buy."
+              disabled={disabled}
+            />
+            <ActionSettingRow
+              title="Update contact fields"
+              description="Fill in custom fields the agent picks up from the chat (email, city, order number, etc.)."
+              setting={actions.updateContactFields}
+              onChange={(next) =>
+                setActions((a) => ({ ...a, updateContactFields: next }))
+              }
+              guidelinesPlaceholder="e.g. Save their city into the City field when they mention it."
+              disabled={disabled}
+            />
+            <ActionSettingRow
+              title="Trigger automations"
+              description="Let the agent trigger one of your existing Automations mid-conversation."
+              setting={actions.triggerAutomations}
+              onChange={(next) =>
+                setActions((a) => ({ ...a, triggerAutomations: next }))
+              }
+              guidelinesPlaceholder='e.g. If the customer asks for the FBR certificate, trigger the "FBR Certificate Flow" automation.'
+              disabled={disabled}
+            />
+          </CardContent>
+        </Card>
+
         <AiKnowledgeCard
           accountId={accountId}
           canEdit={canEdit}
@@ -538,6 +609,47 @@ export function AiConfig() {
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ActionSettingRow({
+  title,
+  description,
+  setting,
+  onChange,
+  guidelinesPlaceholder,
+  disabled,
+}: {
+  title: string;
+  description: string;
+  setting: AiActionSetting;
+  onChange: (next: AiActionSetting) => void;
+  guidelinesPlaceholder: string;
+  disabled: boolean;
+}) {
+  return (
+    <div className="space-y-2 rounded-md border border-border p-3">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-foreground">{title}</p>
+          <p className="text-xs text-muted-foreground">{description}</p>
+        </div>
+        <Switch
+          checked={setting.enabled}
+          onCheckedChange={(enabled) => onChange({ ...setting, enabled })}
+          disabled={disabled}
+        />
+      </div>
+      {setting.enabled && (
+        <Textarea
+          value={setting.guidelines ?? ''}
+          onChange={(e) => onChange({ ...setting, guidelines: e.target.value })}
+          placeholder={guidelinesPlaceholder}
+          rows={2}
+          disabled={disabled}
+        />
+      )}
     </div>
   );
 }

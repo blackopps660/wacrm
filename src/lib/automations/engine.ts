@@ -109,6 +109,75 @@ export async function runAutomationsForTrigger(input: DispatchInput): Promise<vo
 }
 
 /**
+ * Run one specific automation directly by id, bypassing the
+ * trigger-type dispatch loop and its `triggerMatches` gate — the
+ * caller (the AI agent's "trigger automations" action) already picked
+ * this exact automation, so there is no trigger config left to match
+ * against. Still requires the automation to belong to `accountId` and
+ * be `is_active`, and applies the same contact-ownership check as
+ * `runAutomationsForTrigger`.
+ *
+ * Must never throw — same fire-and-forget contract as the trigger
+ * dispatcher. Returns whether the automation actually ran so the
+ * caller can tell its own caller (the LLM) that the action failed.
+ */
+export async function runSpecificAutomation(input: {
+  accountId: string
+  automationId: string
+  contactId?: string | null
+  context?: AutomationContext
+}): Promise<{ ok: boolean; reason?: string }> {
+  try {
+    const db = supabaseAdmin()
+
+    if (input.contactId) {
+      const { data: owned, error: ownErr } = await db
+        .from('contacts')
+        .select('id')
+        .eq('id', input.contactId)
+        .eq('account_id', input.accountId)
+        .maybeSingle()
+      if (ownErr) {
+        console.error('[automations] contact ownership check failed:', ownErr)
+        return { ok: false, reason: 'error' }
+      }
+      if (!owned) {
+        console.warn(
+          '[automations] contact not in account, refusing dispatch',
+          input.contactId,
+        )
+        return { ok: false, reason: 'not_found' }
+      }
+    }
+
+    const { data: automation, error } = await db
+      .from('automations')
+      .select('*')
+      .eq('id', input.automationId)
+      .eq('account_id', input.accountId)
+      .eq('is_active', true)
+      .maybeSingle()
+
+    if (error) {
+      console.error('[automations] runSpecificAutomation lookup failed:', error)
+      return { ok: false, reason: 'error' }
+    }
+    if (!automation) return { ok: false, reason: 'not_found' }
+
+    await executeAutomation(automation as Automation, {
+      accountId: input.accountId,
+      triggerType: automation.trigger_type,
+      contactId: input.contactId,
+      context: input.context,
+    })
+    return { ok: true }
+  } catch (err) {
+    console.error('[automations] runSpecificAutomation failed:', err)
+    return { ok: false, reason: 'error' }
+  }
+}
+
+/**
  * Resume a run that was parked at a wait step. Called from the cron
  * endpoint after it grabs a due `automation_pending_executions` row.
  */

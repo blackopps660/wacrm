@@ -1,4 +1,4 @@
-import { AiError, type ChatMessage } from '../types'
+import { AiError, type ChatMessage, type ToolCall, type ToolDefinition, type ToolResult } from '../types'
 
 // ============================================================
 // Bits shared by the OpenAI + Anthropic adapters.
@@ -10,6 +10,34 @@ export interface ProviderArgs {
   systemPrompt: string
   messages: ChatMessage[]
   timeoutMs: number
+}
+
+/**
+ * One round of a tool-calling conversation with a provider. `Turn` is
+ * opaque to callers outside the adapter — each provider represents
+ * "conversation so far, including any tool calls/results" in its own
+ * wire format (OpenAI: flat messages with a `tool` role; Anthropic:
+ * content-block arrays with `tool_use`/`tool_result` blocks). The
+ * agent loop (`lib/ai/agent.ts`) only ever threads a `Turn[]` through
+ * these three functions — it never inspects the shape itself.
+ */
+export interface ProviderAdapter<Turn> {
+  /** Convert the plain conversation transcript into this provider's
+   *  turn format, as the starting point for the tool-calling loop. */
+  initialTurns(messages: ChatMessage[]): Turn[]
+  /** One model call. Returns the assistant's text (null when it only
+   *  made tool calls) plus any tool calls it asked for. */
+  generateTurn(args: {
+    apiKey: string
+    model: string
+    systemPrompt: string
+    timeoutMs: number
+    turns: Turn[]
+    tools: ToolDefinition[]
+  }): Promise<{ text: string | null; toolCalls: ToolCall[]; assistantTurn: Turn }>
+  /** Append the assistant's turn (with its tool calls) and the
+   *  executed results, ready for the next `generateTurn` call. */
+  appendToolResults(turns: Turn[], assistantTurn: Turn, results: ToolResult[]): Turn[]
 }
 
 /** Map a fetch rejection (timeout / DNS / offline) to a typed AiError. */

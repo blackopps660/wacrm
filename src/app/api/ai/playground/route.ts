@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
-import { loadAiConfig } from '@/lib/ai/config'
+import { loadAiConfig, hasAnyActionEnabled } from '@/lib/ai/config'
 import { retrieveKnowledge } from '@/lib/ai/knowledge'
-import { generateReply } from '@/lib/ai/generate'
+import { runAgentTurn } from '@/lib/ai/agent'
 import { buildSystemPrompt } from '@/lib/ai/defaults'
 import { latestUserMessage } from '@/lib/ai/query'
 import { AiError, type ChatMessage } from '@/lib/ai/types'
@@ -82,9 +82,20 @@ export async function POST(request: Request) {
       userPrompt: config.systemPrompt,
       mode: 'auto_reply',
       knowledge,
+      hasActions: hasAnyActionEnabled(config.actions),
     })
 
-    const { text, handoff } = await generateReply({ config, systemPrompt, messages })
+    // No real contact/conversation in the Playground — `runAgentTurn`
+    // still shows the model any enabled actions (so the transcript
+    // behaves like production) but every tool call is simulated, never
+    // written to real data.
+    const { text, handoff } = await runAgentTurn({
+      config,
+      systemPrompt,
+      messages,
+      db: supabase,
+      accountId,
+    })
     return NextResponse.json({ reply: text, handoff })
   } catch (err) {
     if (err instanceof AiError) {

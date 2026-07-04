@@ -17,7 +17,11 @@ const h = vi.hoisted(() => ({
   },
 }))
 
-vi.mock('./config', () => ({ loadAiConfig: h.loadAiConfig }))
+vi.mock('./config', () => ({
+  loadAiConfig: h.loadAiConfig,
+  hasAnyActionEnabled: (actions: { updateTags: { enabled: boolean }; updateContactFields: { enabled: boolean }; triggerAutomations: { enabled: boolean } }) =>
+    actions.updateTags.enabled || actions.updateContactFields.enabled || actions.triggerAutomations.enabled,
+}))
 vi.mock('./context', () => ({ buildConversationContext: h.buildConversationContext }))
 vi.mock('./knowledge', () => ({ retrieveKnowledge: h.retrieveKnowledge }))
 vi.mock('./generate', () => ({ generateReply: h.generateReply }))
@@ -77,6 +81,11 @@ function aiConfig(overrides: Partial<AiConfig> = {}): AiConfig {
     autoReplyMaxPerConversation: 3,
     embeddingsApiKey: null,
     defaultNewConversationOwner: 'human',
+    actions: {
+      updateTags: { enabled: false, guidelines: null },
+      updateContactFields: { enabled: false, guidelines: null },
+      triggerAutomations: { enabled: false, guidelines: null },
+    },
     ...overrides,
   }
 }

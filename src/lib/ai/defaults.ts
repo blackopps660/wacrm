@@ -54,8 +54,13 @@ export function buildSystemPrompt(args: {
   mode: 'draft' | 'auto_reply'
   /** Knowledge-base excerpts retrieved for the current question. */
   knowledge?: string[]
+  /** True when the account has at least one agent action enabled —
+   *  adds a short guardrail so the model doesn't reach for a tool on
+   *  every turn. Each tool's own description carries the actual
+   *  admin-authored guidance on when to use it. */
+  hasActions?: boolean
 }): string {
-  const { userPrompt, mode, knowledge } = args
+  const { userPrompt, mode, knowledge, hasActions } = args
   const parts: string[] = [
     'You are a customer-messaging assistant for a business that uses a WhatsApp CRM. ' +
       'You are shown the recent WhatsApp conversation between the business (assistant) and a customer (user). ' +
@@ -70,6 +75,11 @@ export function buildSystemPrompt(args: {
     parts.push(
       `You are replying automatically with no human in the loop. If you cannot confidently and safely help — the customer explicitly asks for a human, is upset or complaining, or the request needs information you do not have — reply with exactly ${HANDOFF_SENTINEL} and nothing else. A human agent will then take over. Prefer handing off over guessing.`,
     )
+    if (hasActions) {
+      parts.push(
+        'You may also have tools available to add/remove tags, update a contact field, or trigger an automation. Each tool describes exactly when to use it — most messages just need a normal reply, not a tool call, so only use one when the situation clearly matches its description.',
+      )
+    }
   }
 
   if (userPrompt && userPrompt.trim()) {

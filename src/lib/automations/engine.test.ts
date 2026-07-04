@@ -43,7 +43,20 @@ vi.mock("./admin-client", () => {
       }
       return { data: null, error: null };
     }
-    if (table === "automations") return { data: state.automations, error: null };
+    if (table === "automations") {
+      // runSpecificAutomation looks up by id (+ .maybeSingle()) instead
+      // of the plain trigger-type select runAutomationsForTrigger uses
+      // — special-cased so it gets a single row (or null) instead of
+      // the whole array.
+      const idFilter = ops.filters.find(([kind, key]) => kind === "eq" && key === "id");
+      if (idFilter) {
+        const match = state.automations.find(
+          (a) => (a as { id?: string }).id === idFilter[2],
+        );
+        return { data: match ?? null, error: null };
+      }
+      return { data: state.automations, error: null };
+    }
     if (table === "automation_logs") {
       if (type === "insert") return { data: { id: "log1" }, error: null };
       if (type === "update") return { data: null, error: null };
@@ -95,7 +108,7 @@ vi.mock("./meta-send", () => ({
   engineSendTemplate: vi.fn(async () => ({ whatsapp_message_id: "m1" })),
 }));
 
-import { runAutomationsForTrigger } from "./engine";
+import { runAutomationsForTrigger, runSpecificAutomation } from "./engine";
 
 const ACCOUNT = "acct-1";
 
@@ -221,6 +234,72 @@ describe("update_contact_field — custom fields", () => {
 
     expect(h.state.upsertCalls).toHaveLength(0);
     expect(h.state.updateCalls).toHaveLength(0);
+  });
+});
+
+describe("runSpecificAutomation — direct-by-id (AI agent trigger action)", () => {
+  it("runs the named automation regardless of its own trigger_config", async () => {
+    h.state.owned = { id: "c1" };
+    // trigger_type is keyword_match with a config that would never
+    // match an empty context — proving the direct-by-id path skips
+    // triggerMatches entirely rather than silently no-op'ing.
+    h.state.automations = [
+      {
+        id: "a1",
+        account_id: ACCOUNT,
+        user_id: "u1",
+        trigger_type: "keyword_match",
+        trigger_config: { keywords: ["never-matches-this"] },
+        is_active: true,
+      },
+    ];
+    h.state.steps = [updateStep()];
+
+    const result = await runSpecificAutomation({
+      accountId: ACCOUNT,
+      automationId: "a1",
+      contactId: "c1",
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(h.state.updateCalls).toHaveLength(1);
+  });
+
+  it("refuses when the contact is not in the account", async () => {
+    h.state.owned = null;
+    h.state.automations = [
+      {
+        id: "a1",
+        account_id: ACCOUNT,
+        user_id: "u1",
+        trigger_type: "keyword_match",
+        trigger_config: {},
+        is_active: true,
+      },
+    ];
+    h.state.steps = [updateStep()];
+
+    const result = await runSpecificAutomation({
+      accountId: ACCOUNT,
+      automationId: "a1",
+      contactId: "victim-contact-uuid",
+    });
+
+    expect(result).toEqual({ ok: false, reason: "not_found" });
+    expect(h.state.updateCalls).toHaveLength(0);
+  });
+
+  it("returns not_found when the automation id doesn't exist", async () => {
+    h.state.owned = { id: "c1" };
+    h.state.automations = [];
+
+    const result = await runSpecificAutomation({
+      accountId: ACCOUNT,
+      automationId: "missing-id",
+      contactId: "c1",
+    });
+
+    expect(result).toEqual({ ok: false, reason: "not_found" });
   });
 });
 

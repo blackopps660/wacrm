@@ -1,8 +1,8 @@
 import { supabaseAdmin } from './admin-client'
-import { loadAiConfig } from './config'
+import { loadAiConfig, hasAnyActionEnabled } from './config'
 import { buildConversationContext } from './context'
 import { retrieveKnowledge } from './knowledge'
-import { generateReply } from './generate'
+import { runAgentTurn } from './agent'
 import { buildSystemPrompt } from './defaults'
 import { latestUserMessage } from './query'
 import { engineSendText } from '@/lib/flows/meta-send'
@@ -99,12 +99,21 @@ export async function dispatchInboundToAiReply(
       userPrompt: config.systemPrompt,
       mode: 'auto_reply',
       knowledge,
+      hasActions: hasAnyActionEnabled(config.actions),
     })
 
-    const { text, handoff } = await generateReply({
+    // Real contact/conversation, so any enabled action (update tags,
+    // update fields, trigger an automation) actually writes — unlike
+    // the Playground, which runs the identical loop with simulated
+    // execution.
+    const { text, handoff } = await runAgentTurn({
       config,
       systemPrompt,
       messages,
+      db,
+      accountId,
+      contactId,
+      conversationId,
     })
 
     if (handoff || !text) {

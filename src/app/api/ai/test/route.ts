@@ -74,6 +74,11 @@ export async function POST(request: Request) {
         embeddingsApiKey: null,
         // Irrelevant to a connectivity check — placeholder only.
         defaultNewConversationOwner: 'human',
+        actions: {
+          updateTags: { enabled: false, guidelines: null },
+          updateContactFields: { enabled: false, guidelines: null },
+          triggerAutomations: { enabled: false, guidelines: null },
+        },
       })
     } catch (err) {
       if (err instanceof AiError) {

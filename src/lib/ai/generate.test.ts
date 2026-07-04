@@ -13,6 +13,11 @@ function config(overrides: Partial<AiConfig> = {}): AiConfig {
     autoReplyMaxPerConversation: 3,
     embeddingsApiKey: null,
     defaultNewConversationOwner: 'human',
+    actions: {
+      updateTags: { enabled: false, guidelines: null },
+      updateContactFields: { enabled: false, guidelines: null },
+      triggerAutomations: { enabled: false, guidelines: null },
+    },
     ...overrides,
   }
 }
