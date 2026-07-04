@@ -68,6 +68,19 @@ export interface AccountMember {
 }
 
 /**
+ * One workspace the caller belongs to, for the workspace switcher.
+ * Backed by `account_memberships` (migration 031) — a user can have
+ * several of these; `isCurrent` marks the one profiles.account_id
+ * currently points at.
+ */
+export interface Workspace {
+  id: string;
+  name: string;
+  role: AccountRole;
+  isCurrent: boolean;
+}
+
+/**
  * Outstanding invite link row. `token_hash` is intentionally
  * absent — it lives only in the DB and on the server. The
  * plaintext token is returned once at creation time and surfaced

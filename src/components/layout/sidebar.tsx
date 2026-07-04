@@ -10,61 +10,18 @@ import { useUnreadNotifications } from "@/hooks/use-unread-notifications";
 import {
   Bell,
   Bot,
-  Crown,
   GitBranch,
   LayoutDashboard,
   LogOut,
   MessageSquare,
   Radio,
   Settings,
-  Shield,
   User,
-  UserCog,
   Users,
-  UsersRound,
   Workflow,
   X,
   Zap,
 } from "lucide-react";
-import type { AccountRole } from "@/lib/auth/roles";
-
-// Per-role chip metadata used in the sidebar's account strip + the
-// Members tab roster. Keeping this near both consumers in a single
-// place avoids drift between the two surfaces — when a designer
-// wants to recolour "agent" rows, this is the one diff.
-const ROLE_CHIP: Record<
-  AccountRole,
-  { icon: typeof Crown; label: string; className: string }
-> = {
-  owner: {
-    icon: Crown,
-    label: "Owner",
-    // Amber: scarce, immutable, "the boss" — gets visual emphasis.
-    className:
-      "border-amber-500/40 bg-amber-500/10 text-amber-300",
-  },
-  admin: {
-    icon: Shield,
-    label: "Admin",
-    // Primary-tinted: significant but not as scarce as owner.
-    className:
-      "border-primary/40 bg-primary/10 text-primary",
-  },
-  agent: {
-    icon: UserCog,
-    label: "Agent",
-    // Neutral slate: the operational default.
-    className:
-      "border-border bg-muted text-foreground",
-  },
-  viewer: {
-    icon: User,
-    label: "Viewer",
-    // Muted slate: read-only role; visually quieter than agent.
-    className:
-      "border-border bg-card text-muted-foreground",
-  },
-};
 import {
   Avatar,
   AvatarFallback,
@@ -77,6 +34,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher";
 
 interface NavItem {
   href: string;
@@ -113,21 +71,9 @@ interface SidebarProps {
 
 export function Sidebar({ open = false, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const { profile, profileLoading, account, accountRole, signOut } = useAuth();
+  const { profile, signOut } = useAuth();
   const totalUnread = useTotalUnread();
   const unreadNotifications = useUnreadNotifications();
-  // Only surface the account-name strip when it actually carries
-  // information. A solo user's personal account is named after them
-  // (the 017 signup trigger seeds it from `full_name`), so showing it
-  // here would just duplicate the user name in the footer below. Once
-  // the account is renamed or the user joins a shared account, the
-  // name diverges and the strip becomes meaningful — that's the signal
-  // we gate on. Wait for the profile fetch to settle first, otherwise
-  // the strip flashes in once the row resolves (a layout jump).
-  const showAccountStrip =
-    !profileLoading &&
-    !!account?.name &&
-    account.name !== profile?.full_name;
 
   // Close the drawer when route changes — users opened it to navigate,
   // so once they pick a destination the drawer should get out of the way.
@@ -292,41 +238,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
 
         {/* User section */}
         <div className="shrink-0 border-t border-border p-3">
-          {/* Account name display — surfaced only when the account
-              name differs from the user's own name (see
-              `showAccountStrip`). For a default solo account the two
-              match, so we hide it to avoid duplicating the user name
-              below; for renamed or shared accounts it tells the user
-              which account they're acting in. */}
-          {showAccountStrip && account?.name ? (
-            <div className="mb-2 flex items-center gap-2 px-3 text-xs text-muted-foreground">
-              <UsersRound className="size-3.5 shrink-0" />
-              {/* `title=` exposes the full name on hover when it
-                  gets truncated (long account names + narrow
-                  sidebars). Cheap a11y win. */}
-              <span className="truncate" title={account.name}>
-                {account.name}
-              </span>
-              {accountRole ? (
-                // Always render the chip — owners used to be
-                // invisible here, which made them indistinguishable
-                // from admins at a glance. Now everyone sees their
-                // role (with a colour cue) regardless of tier.
-                (() => {
-                  const meta = ROLE_CHIP[accountRole];
-                  const Icon = meta.icon;
-                  return (
-                    <span
-                      className={`ml-auto inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ${meta.className}`}
-                    >
-                      <Icon className="size-3" />
-                      {meta.label}
-                    </span>
-                  );
-                })()
-              ) : null}
-            </div>
-          ) : null}
+          <WorkspaceSwitcher />
           <DropdownMenu>
             <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted/60 focus:bg-muted/60 focus:outline-none data-popup-open:bg-muted/60">
               <Avatar className="size-8 shrink-0">

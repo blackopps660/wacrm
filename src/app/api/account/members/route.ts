@@ -10,6 +10,18 @@
 //   admin+. Agents and viewers see name + avatar + role + joined
 //   date only. This mirrors the design decision from the planning
 //   phase: "agent/viewer sees names only".
+//
+// Two-query pattern (not an embedded FK join)
+//   Membership (account_memberships) and identity (profiles) are
+//   separate tables since migration 031. A member's *roster* row
+//   here must reflect account_memberships, not profiles.account_id
+//   — a member who has switched their active view to a different
+//   workspace would otherwise vanish from this list even though
+//   they're still a member. We avoid `account_memberships.select(
+//   "*, profiles(...)")` for the same reason getCurrentAccount()
+//   avoids embeds (see account.ts): a stale PostgREST schema cache
+//   makes embedded relationship lookups fail hard (PGRST200,
+//   issue #294). Two plain point queries side-step that entirely.
 // ============================================================
 
 import { NextResponse } from "next/server";
@@ -18,49 +30,80 @@ import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
 import { canManageMembers, isAccountRole } from "@/lib/auth/roles";
 import type { AccountMember } from "@/types";
 
+interface MembershipRow {
+  user_id: string;
+  role: string;
+  created_at: string;
+}
+
 interface ProfileRow {
   user_id: string;
   full_name: string | null;
   email: string | null;
   avatar_url: string | null;
-  account_role: string;
-  created_at: string;
 }
 
 export async function GET() {
   try {
     const ctx = await getCurrentAccount();
 
-    // RLS on profiles allows reading any row whose account matches
-    // the caller's, so this query is naturally account-scoped.
-    const { data, error } = await ctx.supabase
-      .from("profiles")
-      .select("user_id, full_name, email, avatar_url, account_role, created_at")
+    const { data: memberships, error: membershipsErr } = await ctx.supabase
+      .from("account_memberships")
+      .select("user_id, role, created_at")
       .eq("account_id", ctx.accountId)
       .order("created_at", { ascending: true });
 
-    if (error) {
-      console.error("[GET /api/account/members] fetch error:", error);
+    if (membershipsErr) {
+      console.error(
+        "[GET /api/account/members] memberships fetch error:",
+        membershipsErr,
+      );
       return NextResponse.json(
         { error: "Failed to load members" },
         { status: 500 },
       );
     }
 
+    const rows = (memberships ?? []) as MembershipRow[];
+    if (rows.length === 0) {
+      return NextResponse.json({ members: [] });
+    }
+
+    const userIds = rows.map((r) => r.user_id);
+    const { data: profiles, error: profilesErr } = await ctx.supabase
+      .from("profiles")
+      .select("user_id, full_name, email, avatar_url")
+      .in("user_id", userIds);
+
+    if (profilesErr) {
+      console.error(
+        "[GET /api/account/members] profiles fetch error:",
+        profilesErr,
+      );
+      return NextResponse.json(
+        { error: "Failed to load members" },
+        { status: 500 },
+      );
+    }
+
+    const profileById = new Map(
+      ((profiles ?? []) as ProfileRow[]).map((p) => [p.user_id, p]),
+    );
     const canSeeEmails = canManageMembers(ctx.role);
 
-    const members: AccountMember[] = (data as ProfileRow[]).flatMap((row) => {
+    const members: AccountMember[] = rows.flatMap((row) => {
       // Defensive: the DB enum should never let an unknown role
       // through, but if a migration ever broadens the enum without
       // updating TS, skip the row rather than crash the page.
-      if (!isAccountRole(row.account_role)) return [];
+      if (!isAccountRole(row.role)) return [];
+      const profile = profileById.get(row.user_id);
       return [
         {
           user_id: row.user_id,
-          full_name: row.full_name ?? "",
-          email: canSeeEmails ? row.email : null,
-          avatar_url: row.avatar_url,
-          role: row.account_role,
+          full_name: profile?.full_name ?? "",
+          email: canSeeEmails ? (profile?.email ?? null) : null,
+          avatar_url: profile?.avatar_url ?? null,
+          role: row.role,
           joined_at: row.created_at,
         },
       ];
