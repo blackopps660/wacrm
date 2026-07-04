@@ -160,12 +160,18 @@ export interface ContactNote {
 
 export type ConversationStatus = 'open' | 'pending' | 'closed';
 
+/** Who owns a conversation right now — migration 037. Source of truth
+ *  for the assign dropdown, the inbox badge, and the AI auto-reply gate
+ *  (`dispatchInboundToAiReply` only fires when this is `'ai'`). */
+export type ConversationOwnerKind = "unassigned" | "human" | "ai";
+
 export interface Conversation {
   id: string;
   user_id: string;
   contact_id: string;
   status: ConversationStatus;
   assigned_agent_id?: string;
+  owner_kind: ConversationOwnerKind;
   last_message_text?: string;
   last_message_at?: string;
   unread_count: number;

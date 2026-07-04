@@ -72,6 +72,8 @@ export async function POST(request: Request) {
         autoReplyEnabled: false,
         autoReplyMaxPerConversation: 3,
         embeddingsApiKey: null,
+        // Irrelevant to a connectivity check — placeholder only.
+        defaultNewConversationOwner: 'human',
       })
     } catch (err) {
       if (err instanceof AiError) {

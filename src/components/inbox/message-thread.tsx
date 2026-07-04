@@ -16,6 +16,7 @@ import { presenceLabel } from "@/lib/presence";
 import { cn } from "@/lib/utils";
 import type {
   Conversation,
+  ConversationOwnerKind,
   Message,
   MessageReaction,
   Contact,
@@ -33,6 +34,8 @@ import {
   RefreshCw,
   PanelRightOpen,
   PanelRightClose,
+  Bot,
+  ArrowRightLeft,
 } from "lucide-react";
 import { format, isToday, isYesterday, differenceInHours } from "date-fns";
 import { Badge } from "@/components/ui/badge";
@@ -82,6 +85,7 @@ interface MessageThreadProps {
   onAssignChange: (
     conversationId: string,
     assignedAgentId: string | null,
+    ownerKind: ConversationOwnerKind,
   ) => void;
   /**
    * On mobile, the thread is shown full-screen with the conversation list
@@ -201,6 +205,13 @@ export function MessageThread({
   const prevScrollHeightRef = useRef<number | null>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  // Whether the AI agent is a real, currently-usable assignee — not
+  // just "a row exists". Mirrors the eligibility auto-reply itself
+  // checks (`dispatchInboundToAiReply`): configured, master switch on,
+  // and auto-reply specifically enabled. Assigning to AI when any of
+  // these is false would silently stamp owner_kind='ai' on a
+  // conversation nothing will ever answer.
+  const [aiAgentAvailable, setAiAgentAvailable] = useState(false);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
   // Purely visual spin state for the manual-refresh button. The actual
   // refetch is fire-and-forget through `onRefresh` (which bumps the
@@ -243,6 +254,27 @@ export function MessageThread({
           return;
         }
         setProfiles((data as Profile[]) ?? []);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // AI agent availability — any member can read this endpoint (it's
+  // designed for exactly this: "so the inbox/settings can reflect
+  // whether AI is set up", per its own docstring).
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/ai/config")
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        setAiAgentAvailable(
+          !!data.configured && !!data.is_active && !!data.auto_reply_enabled,
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setAiAgentAvailable(false);
       });
     return () => {
       cancelled = true;
@@ -864,14 +896,21 @@ export function MessageThread({
     [conversation, user?.id],
   );
 
-  const handleAssignChange = useCallback(
-    async (agentId: string | null) => {
+  // One update function for all three assignment outcomes — the only
+  // thing that varies is which (owner_kind, assigned_agent_id) pair
+  // gets written. Human assignment also implicitly takes the
+  // conversation over from the AI agent (owner_kind flips to 'human'),
+  // which is what the dedicated "Take over" button below calls this
+  // with — same effect as picking yourself from the dropdown, just a
+  // one-click shortcut for the single most common case.
+  const applyAssignment = useCallback(
+    async (ownerKind: ConversationOwnerKind, agentId: string | null) => {
       if (!conversation) return;
 
       const supabase = createClient();
       const { error } = await supabase
         .from("conversations")
-        .update({ assigned_agent_id: agentId })
+        .update({ owner_kind: ownerKind, assigned_agent_id: agentId })
         .eq("id", conversation.id);
 
       if (error) {
@@ -880,10 +919,26 @@ export function MessageThread({
         return;
       }
 
-      onAssignChange(conversation.id, agentId);
+      onAssignChange(conversation.id, agentId, ownerKind);
     },
     [conversation, onAssignChange],
   );
+
+  const handleAssignChange = useCallback(
+    (agentId: string | null) => {
+      void applyAssignment(agentId ? "human" : "unassigned", agentId);
+    },
+    [applyAssignment],
+  );
+
+  const handleAssignToAi = useCallback(() => {
+    void applyAssignment("ai", null);
+  }, [applyAssignment]);
+
+  const handleTakeOver = useCallback(() => {
+    if (!user?.id) return;
+    void applyAssignment("human", user.id);
+  }, [applyAssignment, user?.id]);
 
   // Empty state — same WhatsApp-style doodle background as the active
   // thread below, so swapping between empty/selected doesn't change the
@@ -911,9 +966,12 @@ export function MessageThread({
   );
   const assignedAgentId = conversation.assigned_agent_id ?? null;
   const currentAssignee = profiles.find((p) => p.user_id === assignedAgentId);
-  const assignLabel = assignedAgentId
-    ? (currentAssignee?.full_name ?? "Assigned")
-    : "Assign";
+  const isAiOwned = conversation.owner_kind === "ai";
+  const assignLabel = isAiOwned
+    ? "AI Agent"
+    : assignedAgentId
+      ? (currentAssignee?.full_name ?? "Assigned")
+      : "Assign";
 
   return (
     // `min-w-0` is load-bearing: the page already puts min-w-0 on the
@@ -1037,15 +1095,40 @@ export function MessageThread({
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {/* Take over — one click straight to "assigned to me", shown
+              only while the AI agent owns the thread. Same effect as
+              picking yourself from the assign dropdown below; this is
+              just the fast path for the single most common action
+              (respond.io calls this exact affordance "Take over"). */}
+          {isAiOwned && (
+            <button
+              type="button"
+              onClick={handleTakeOver}
+              title="Take over from the AI agent"
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-primary/40 bg-primary/10 px-2 text-xs font-medium text-primary hover:bg-primary/20"
+            >
+              <ArrowRightLeft className="h-3 w-3" />
+              <span className="hidden sm:inline">Take over</span>
+            </button>
+          )}
+
           {/* Assign dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger
               className={cn(
                 "inline-flex items-center justify-center h-7 gap-1 px-2 text-xs rounded-md hover:bg-muted",
-                assignedAgentId ? "text-primary" : "text-muted-foreground"
+                isAiOwned
+                  ? "text-primary"
+                  : assignedAgentId
+                    ? "text-primary"
+                    : "text-muted-foreground"
               )}
             >
-              <UserPlus className="h-3 w-3" />
+              {isAiOwned ? (
+                <Bot className="h-3 w-3" />
+              ) : (
+                <UserPlus className="h-3 w-3" />
+              )}
               <span className="hidden sm:inline">{assignLabel}</span>
               <ChevronDown className="h-3 w-3" />
             </DropdownMenuTrigger>
@@ -1053,13 +1136,29 @@ export function MessageThread({
               align="end"
               className="border-border bg-popover"
             >
+              {aiAgentAvailable && (
+                <>
+                  <DropdownMenuItem
+                    onClick={handleAssignToAi}
+                    className={cn(
+                      "text-sm",
+                      isAiOwned ? "text-primary" : "text-popover-foreground"
+                    )}
+                  >
+                    <Bot className="mr-2 h-3.5 w-3.5" />
+                    <span className="flex-1">AI Agent</span>
+                    {isAiOwned && <Check className="ml-2 h-3 w-3" />}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator className="bg-border" />
+                </>
+              )}
               {profiles.length === 0 ? (
                 <DropdownMenuItem disabled className="text-sm text-muted-foreground">
                   No teammates available
                 </DropdownMenuItem>
               ) : (
                 profiles.map((p) => {
-                  const isSelected = p.user_id === assignedAgentId;
+                  const isSelected = !isAiOwned && p.user_id === assignedAgentId;
                   const presence = getPresence(p.user_id);
                   return (
                     <DropdownMenuItem
@@ -1088,7 +1187,7 @@ export function MessageThread({
                   );
                 })
               )}
-              {assignedAgentId && (
+              {(assignedAgentId || isAiOwned) && (
                 <>
                   <DropdownMenuSeparator className="bg-border" />
                   <DropdownMenuItem

@@ -9,7 +9,7 @@ import {
 } from "@/lib/inbox/conversations";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus, Tag } from "@/types";
-import { Search, ChevronDown, X } from "lucide-react";
+import { Search, ChevronDown, X, Bot } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Input } from "@/components/ui/input";
 import {
@@ -574,8 +574,21 @@ function ConversationItem({
       {/* Content */}
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-sm font-medium text-foreground">
-            {displayName}
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-sm font-medium text-foreground">
+              {displayName}
+            </span>
+            {/* AI-owned badge — the same signal the thread header's
+                assign-dropdown trigger shows, surfaced here so an agent
+                can spot AI-handled threads without opening each one. */}
+            {conversation.owner_kind === "ai" && (
+              <span
+                title="AI agent is handling this conversation"
+                className="flex shrink-0 items-center justify-center rounded-full bg-primary/10 p-0.5 text-primary"
+              >
+                <Bot className="size-3" />
+              </span>
+            )}
           </span>
           <span className="shrink-0 text-[10px] text-muted-foreground">{timeAgo}</span>
         </div>

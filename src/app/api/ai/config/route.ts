@@ -147,6 +147,8 @@ export async function POST(request: Request) {
           autoReplyEnabled,
           autoReplyMaxPerConversation: maxPer,
           embeddingsApiKey: null,
+          // Irrelevant to a connectivity check — placeholder only.
+          defaultNewConversationOwner: 'human',
         })
       } catch (err) {
         if (err instanceof AiError) {

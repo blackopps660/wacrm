@@ -27,7 +27,10 @@ interface DispatchArgs {
  *
  * Eligibility gates (any → silent no-op):
  *   - AI off / auto-reply disabled for the account
- *   - a human agent is assigned (they own the thread)
+ *   - the conversation isn't explicitly owned by the AI agent
+ *     (migration 037 — `owner_kind` is the source of truth now; a
+ *     human-assigned or merely-unassigned conversation is not this
+ *     bot's to answer)
  *   - auto-reply was disabled for this conversation (prior handoff)
  *   - the per-conversation reply cap is reached
  *   - there's nothing to reply to
@@ -66,11 +69,11 @@ export async function dispatchInboundToAiReply(
 
     const { data: conv, error: convErr } = await db
       .from('conversations')
-      .select('assigned_agent_id, ai_autoreply_disabled, ai_reply_count')
+      .select('owner_kind, ai_autoreply_disabled, ai_reply_count')
       .eq('id', conversationId)
       .maybeSingle()
     if (convErr || !conv) return
-    if (conv.assigned_agent_id) return // a human owns this thread
+    if (conv.owner_kind !== 'ai') return // not this bot's conversation
     if (conv.ai_autoreply_disabled) return // handed off / turned off here
     // Cheap early-out; the authoritative cap check is the atomic claim
     // below (this read can race a concurrent inbound).
@@ -103,9 +106,12 @@ export async function dispatchInboundToAiReply(
       // The model can't (or shouldn't) answer — stop auto-replying on
       // this thread and leave the inbound unanswered so it surfaces in
       // the inbox for a human. Sticky until an admin re-enables.
+      // `owner_kind: 'human'` moves it out of the AI bucket visibly (the
+      // inbox badge / "unassigned human queue" — not just a silent stop
+      // that would otherwise still show the conversation as AI-owned).
       await db
         .from('conversations')
-        .update({ ai_autoreply_disabled: true })
+        .update({ ai_autoreply_disabled: true, owner_kind: 'human' })
         .eq('id', conversationId)
       return
     }

@@ -21,6 +21,9 @@ export interface AiConfig {
   isActive: boolean
   autoReplyEnabled: boolean
   autoReplyMaxPerConversation: number
+  /** What a brand-new (or reopened-from-closed) conversation is routed
+   *  to by default — see migration 037. */
+  defaultNewConversationOwner: 'ai' | 'human'
   /** Optional OpenAI-compatible key for embeddings. When set, the
    *  knowledge base is embedded and semantic retrieval turns on; when
    *  null, retrieval falls back to lexical full-text search. */

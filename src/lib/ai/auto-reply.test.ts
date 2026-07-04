@@ -76,13 +76,14 @@ function aiConfig(overrides: Partial<AiConfig> = {}): AiConfig {
     autoReplyEnabled: true,
     autoReplyMaxPerConversation: 3,
     embeddingsApiKey: null,
+    defaultNewConversationOwner: 'human',
     ...overrides,
   }
 }
 
 beforeEach(() => {
   h.state.conv = {
-    assigned_agent_id: null,
+    owner_kind: 'ai',
     ai_autoreply_disabled: false,
     ai_reply_count: 0,
   }
@@ -147,9 +148,19 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
     expect(h.engineSendText).not.toHaveBeenCalled()
   })
 
-  it('skips when a human agent is assigned', async () => {
+  it('skips when the conversation is not owned by the AI agent', async () => {
     h.state.conv = {
-      assigned_agent_id: 'agent-9',
+      owner_kind: 'human',
+      ai_autoreply_disabled: false,
+      ai_reply_count: 0,
+    }
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText).not.toHaveBeenCalled()
+  })
+
+  it('skips when the conversation is unassigned (not explicitly AI-owned)', async () => {
+    h.state.conv = {
+      owner_kind: 'unassigned',
       ai_autoreply_disabled: false,
       ai_reply_count: 0,
     }
@@ -159,7 +170,7 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
 
   it('skips when auto-reply was disabled on this conversation', async () => {
     h.state.conv = {
-      assigned_agent_id: null,
+      owner_kind: 'ai',
       ai_autoreply_disabled: true,
       ai_reply_count: 0,
     }
@@ -169,7 +180,7 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
 
   it('skips when the per-conversation cap is reached', async () => {
     h.state.conv = {
-      assigned_agent_id: null,
+      owner_kind: 'ai',
       ai_autoreply_disabled: false,
       ai_reply_count: 3,
     }
@@ -190,7 +201,10 @@ describe('dispatchInboundToAiReply — handoff', () => {
     h.generateReply.mockResolvedValue({ text: '', handoff: true })
     await dispatchInboundToAiReply(ARGS)
     expect(h.engineSendText).not.toHaveBeenCalled()
-    expect(h.state.updatePayload).toEqual({ ai_autoreply_disabled: true })
+    expect(h.state.updatePayload).toEqual({
+      ai_autoreply_disabled: true,
+      owner_kind: 'human',
+    })
     expect(h.state.rpcCalls).toHaveLength(0)
   })
 })

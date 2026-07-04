@@ -9,6 +9,7 @@ import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
+import { loadAiConfig } from '@/lib/ai/config'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import {
   handleTemplateWebhookChange,
@@ -639,6 +640,35 @@ async function processMessage(
     return
   }
 
+  // Route ownership — a brand-new conversation, or one reopening from
+  // `closed`, gets (re-)routed per the workspace's default-assignment
+  // policy (migration 037). An already-open/pending conversation keeps
+  // whatever owner_kind it has; this only fires at the start of a
+  // "round" of contact, matching how ai_reply_count/ai_autoreply_disabled
+  // already reset per round today.
+  if (convResult.created || conversation.status === 'closed') {
+    const ownerKind = await resolveDefaultOwnerKind(accountId)
+    const { error: ownerErr } = await supabaseAdmin()
+      .from('conversations')
+      .update({
+        owner_kind: ownerKind,
+        status: 'open',
+        assigned_agent_id: null,
+        ai_autoreply_disabled: false,
+        ai_reply_count: 0,
+      })
+      .eq('id', conversation.id)
+    if (ownerErr) {
+      console.error('[webhook] failed to route conversation ownership:', ownerErr)
+    } else {
+      conversation.owner_kind = ownerKind
+      conversation.status = 'open'
+      conversation.assigned_agent_id = null
+      conversation.ai_autoreply_disabled = false
+      conversation.ai_reply_count = 0
+    }
+  }
+
   // Parse message content based on type
   const { contentText, mediaUrl, mediaType, cacheableMediaId, interactiveReplyId } =
     await parseMessageContent(message, accessToken)
@@ -915,6 +945,33 @@ async function cacheInboundMedia({
       err instanceof Error ? err.message : err,
     )
   }
+}
+
+/**
+ * The workspace's default-assignment policy (migration 037), applied
+ * whenever a conversation starts a new "round" of contact (brand new,
+ * or reopening from `closed`). Returns 'ai' only when the admin has
+ * opted into AI routing AND the AI agent is actually active/enabled —
+ * if AI is merely preferred but not configured (or was since turned
+ * off), routing still falls back to the human queue rather than
+ * stamping owner_kind='ai' on a conversation nothing will ever answer.
+ */
+async function resolveDefaultOwnerKind(
+  accountId: string,
+): Promise<'ai' | 'human'> {
+  try {
+    const config = await loadAiConfig(supabaseAdmin(), accountId)
+    if (
+      config &&
+      config.autoReplyEnabled &&
+      config.defaultNewConversationOwner === 'ai'
+    ) {
+      return 'ai'
+    }
+  } catch (err) {
+    console.error('[webhook] resolveDefaultOwnerKind failed, defaulting to human:', err)
+  }
+  return 'human'
 }
 
 async function parseMessageContent(
