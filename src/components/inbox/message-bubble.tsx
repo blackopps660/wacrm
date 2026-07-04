@@ -264,7 +264,7 @@ export function MessageBubble({
         className={cn(
           "relative rounded-2xl px-3 py-2",
           isAgent
-            ? "rounded-br-md bg-primary text-primary-foreground"
+            ? "rounded-br-md bg-bubble-outbound text-bubble-outbound-foreground"
             : "rounded-bl-md bg-muted text-foreground",
         )}
       >
@@ -285,11 +285,12 @@ export function MessageBubble({
           <span
             className={cn(
               "text-[10px]",
-              // Outbound bubbles sit on the primary fill, so the
-              // timestamp must read against that (not the neutral
-              // foreground) — otherwise it goes low-contrast in light
-              // mode. Inbound bubbles use the muted surface.
-              isAgent ? "text-primary-foreground/70" : "text-muted-foreground",
+              // Outbound bubbles sit on the muted bubble-outbound fill
+              // (a deliberately deep, desaturated tint — a full-brightness
+              // primary fill read as a jarring "neon" block), so the
+              // timestamp must read against that, not the neutral
+              // foreground. Inbound bubbles use the muted surface.
+              isAgent ? "text-bubble-outbound-foreground/70" : "text-muted-foreground",
             )}
           >
             {time}

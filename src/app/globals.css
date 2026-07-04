@@ -48,6 +48,10 @@
   --color-primary-hover: var(--primary-hover);
   --color-primary-soft: var(--primary-soft);
   --color-primary-soft-2: var(--primary-soft-2);
+  /* Muted outbound chat-bubble fill — bg-bubble-outbound,
+   * text-bubble-outbound-foreground. See the per-theme values below. */
+  --color-bubble-outbound: var(--bubble-outbound);
+  --color-bubble-outbound-foreground: var(--bubble-outbound-foreground);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -159,6 +163,13 @@ html[data-theme="violet"] {
   --sidebar-primary: oklch(0.526 0.247 293);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-ring: oklch(0.526 0.247 293);
+  /* Deep, desaturated tint for the outbound chat bubble — using the
+   * full-brightness --primary there reads as a vivid "neon" block
+   * against the dark inbox background (issue: looked unprofessional).
+   * Calibrated close to WhatsApp's own dark-mode bubble (~oklch(0.35
+   * 0.06 165)): low chroma, mid-low lightness, same hue as the accent. */
+  --bubble-outbound: oklch(0.32 0.1 293);
+  --bubble-outbound-foreground: oklch(0.93 0.02 293);
 }
 
 html[data-theme="emerald"] {
@@ -173,6 +184,8 @@ html[data-theme="emerald"] {
   --sidebar-primary: oklch(0.62 0.16 162);
   --sidebar-primary-foreground: oklch(0.16 0.02 162);
   --sidebar-ring: oklch(0.62 0.16 162);
+  --bubble-outbound: oklch(0.32 0.07 162);
+  --bubble-outbound-foreground: oklch(0.92 0.03 162);
 }
 
 html[data-theme="cobalt"] {
@@ -187,6 +200,8 @@ html[data-theme="cobalt"] {
   --sidebar-primary: oklch(0.585 0.2 254);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-ring: oklch(0.585 0.2 254);
+  --bubble-outbound: oklch(0.32 0.08 254);
+  --bubble-outbound-foreground: oklch(0.92 0.02 254);
 }
 
 html[data-theme="amber"] {
@@ -201,6 +216,8 @@ html[data-theme="amber"] {
   --sidebar-primary: oklch(0.745 0.16 65);
   --sidebar-primary-foreground: oklch(0.18 0.03 65);
   --sidebar-ring: oklch(0.745 0.16 65);
+  --bubble-outbound: oklch(0.34 0.07 65);
+  --bubble-outbound-foreground: oklch(0.92 0.03 65);
 }
 
 html[data-theme="rose"] {
@@ -215,6 +232,8 @@ html[data-theme="rose"] {
   --sidebar-primary: oklch(0.645 0.22 16);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-ring: oklch(0.645 0.22 16);
+  --bubble-outbound: oklch(0.32 0.09 16);
+  --bubble-outbound-foreground: oklch(0.93 0.02 16);
 }
 
 @layer base {
