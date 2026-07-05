@@ -36,9 +36,11 @@
       "typedRoutes": true
     },
     "extra": {
+      "router": {},
       "eas": {
-        "projectId": null
+        "projectId": "ecab1b01-854c-4247-8b4d-cda21633e527"
       }
-    }
+    },
+    "owner": "blinkmoon.io"
   }
 }
