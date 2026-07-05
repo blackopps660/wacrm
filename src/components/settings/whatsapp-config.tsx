@@ -22,6 +22,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { SettingsPanelHead } from './settings-panel-head';
+import { WhatsAppBusinessProfile } from './whatsapp-business-profile';
 import {
   Accordion,
   AccordionItem,
@@ -556,6 +557,12 @@ export function WhatsAppConfig() {
             )}
           </Alert>
         )}
+
+        {/* WhatsApp Business Profile — photo/about/address/description/
+            email/category/websites shown to customers on this number.
+            Only meaningful once credentials actually validate against
+            Meta; hidden otherwise so there's nothing to sync yet. */}
+        <WhatsAppBusinessProfile enabled={connectionStatus === 'connected'} />
 
         {/* API Credentials */}
         <Card>

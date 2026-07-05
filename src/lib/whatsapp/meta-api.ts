@@ -1034,3 +1034,87 @@ export async function downloadMedia(
   const buffer = Buffer.from(await response.arrayBuffer())
   return { buffer, contentType }
 }
+
+// ============================================================
+// WhatsApp Business Profile
+// ============================================================
+//
+// The customer-facing "About/bio" surface Meta shows on the number's
+// WhatsApp profile (photo, about, address, description, email,
+// category, up to 2 websites) — separate from the Cloud API messaging
+// config above. Read via GET, written via POST; both keyed on the
+// phone_number_id (not the WABA id).
+//
+// https://developers.facebook.com/docs/whatsapp/cloud-api/reference/business-profiles
+
+const BUSINESS_PROFILE_FIELDS =
+  'about,address,description,email,profile_picture_url,websites,vertical'
+
+export interface WhatsAppBusinessProfile {
+  about?: string
+  address?: string
+  description?: string
+  email?: string
+  profile_picture_url?: string
+  websites?: string[]
+  vertical?: string
+}
+
+export interface GetWhatsAppBusinessProfileArgs {
+  phoneNumberId: string
+  accessToken: string
+}
+
+/** Fetch the current WhatsApp Business Profile for a connected number. */
+export async function getWhatsAppBusinessProfile(
+  args: GetWhatsAppBusinessProfileArgs,
+): Promise<WhatsAppBusinessProfile> {
+  const { phoneNumberId, accessToken } = args
+  const url = `${META_API_BASE}/${phoneNumberId}/whatsapp_business_profile?fields=${BUSINESS_PROFILE_FIELDS}`
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = (await response.json()) as { data?: WhatsAppBusinessProfile[] }
+  return data.data?.[0] ?? {}
+}
+
+export interface UpdateWhatsAppBusinessProfileArgs {
+  phoneNumberId: string
+  accessToken: string
+  /**
+   * Only include the fields being changed — Meta only updates what's
+   * present in the body. `profile_picture_handle` comes from
+   * `uploadResumableMedia` (same handle mechanism as template headers).
+   */
+  profile: {
+    about?: string
+    address?: string
+    description?: string
+    email?: string
+    vertical?: string
+    websites?: string[]
+    profile_picture_handle?: string
+  }
+}
+
+/** Update one or more WhatsApp Business Profile fields. */
+export async function updateWhatsAppBusinessProfile(
+  args: UpdateWhatsAppBusinessProfileArgs,
+): Promise<void> {
+  const { phoneNumberId, accessToken, profile } = args
+  const url = `${META_API_BASE}/${phoneNumberId}/whatsapp_business_profile`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ messaging_product: 'whatsapp', ...profile }),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+}
