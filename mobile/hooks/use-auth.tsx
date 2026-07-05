@@ -12,6 +12,7 @@ import { router } from 'expo-router';
 import type { User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { DEFAULT_CURRENCY } from '../lib/currency';
+import { syncPushTokenWithBackend, unregisterPushToken } from '../lib/push-notifications';
 import {
   canEditSettings as canEditSettingsFor,
   canManageMembers as canManageMembersFor,
@@ -162,6 +163,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (currentUser) {
           fetchProfile(currentUser.id);
+          // Best-effort, fire-and-forget — a push registration failure
+          // (e.g. no EAS project configured yet) must never block auth.
+          void syncPushTokenWithBackend();
         } else {
           setProfileLoading(false);
         }
@@ -185,6 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (currentUser) {
         if (currentUser.id !== lastFetchedUserIdRef.current) {
           fetchProfile(currentUser.id);
+          void syncPushTokenWithBackend();
         }
       } else {
         lastFetchedUserIdRef.current = null;
@@ -204,6 +209,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [fetchProfile]);
 
   const signOut = useCallback(async () => {
+    // Must run before signOut() — needs the still-valid session to
+    // authenticate the DELETE call.
+    await unregisterPushToken();
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);

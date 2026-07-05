@@ -11,6 +11,7 @@ import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { loadDefaultAiConfig } from '@/lib/ai/config'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
+import { dispatchPushForNewMessage } from '@/lib/push/dispatch'
 import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
@@ -899,6 +900,17 @@ async function processMessage(
     whatsapp_message_id: message.id,
     content_type: contentType,
     text: contentText,
+  })
+
+  // Mobile push (Phase 6) — the "app backgrounded/killed" counterpart
+  // to realtime (which only reaches an open app). Same
+  // never-throws/awaited-inside-after() contract as the webhook
+  // dispatch above; a push failure must never affect message storage.
+  await dispatchPushForNewMessage(supabaseAdmin(), {
+    accountId,
+    senderName: contactRecord.name || contactRecord.phone,
+    previewText: inboundText.trim() || `Sent a ${contentType}`,
+    conversationId: conversation.id,
   })
 
   // Download, compress, and cache the media LAST — after the message
