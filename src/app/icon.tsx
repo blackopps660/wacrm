@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og";
 
-// Replaces the default Next.js favicon with the brand mark — Hostinger
-// violet rounded square + white chat-square glyph — matching the
+// Replaces the default Next.js favicon with the BlinkMoon brand mark —
+// violet rounded square + white crescent-moon glyph — matching the
 // sidebar logo in `src/components/layout/sidebar.tsx`. Next.js renders
 // this at build time and auto-injects <link rel="icon"> into <head>.
 //
@@ -36,7 +36,9 @@ export default function Icon() {
           strokeLinecap="round"
           strokeLinejoin="round"
         >
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          <path d="M18 5h4" />
+          <path d="M20 3v4" />
+          <path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401" />
         </svg>
       </div>
     ),
