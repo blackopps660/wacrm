@@ -82,6 +82,13 @@ interface WhatsAppWebhookEntry {
         status: string
         timestamp: string
         recipient_id: string
+        /** Present when status === 'failed' — Meta's reason for the rejection. */
+        errors?: Array<{
+          code: number
+          title?: string
+          message?: string
+          error_data?: { details?: string }
+        }>
       }>
     }
     field: string
@@ -356,6 +363,12 @@ async function handleStatusUpdate(status: {
   status: string
   timestamp: string
   recipient_id: string
+  errors?: Array<{
+    code: number
+    title?: string
+    message?: string
+    error_data?: { details?: string }
+  }>
 }) {
   // 1) Mirror onto messages (legacy behavior) — Meta's status values
   //    already match the CHECK constraint on messages.status.
@@ -367,9 +380,20 @@ async function handleStatusUpdate(status: {
   //    array and step 3 below picks `data[0]` — same "arbitrary one
   //    row, purely to resolve the owning account" contract the old
   //    separate `.limit(1).maybeSingle()` read had.
+  //
+  // `errors[0]` is only present on `status === 'failed'` — captured so
+  // failed sends are self-explanatory in the inbox instead of only
+  // showing a bare "failed" with no reason (see migration 045).
+  const firstError = status.errors?.[0]
+  const errorMessage = firstError
+    ? [firstError.title, firstError.error_data?.details ?? firstError.message]
+        .filter(Boolean)
+        .join(' — ')
+    : null
+
   const { data: updatedMessages, error: msgErr } = await supabaseAdmin()
     .from('messages')
-    .update({ status: status.status })
+    .update({ status: status.status, error_message: errorMessage })
     .eq('message_id', status.id)
     .select('conversation_id, conversations(account_id)')
 

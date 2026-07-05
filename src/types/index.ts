@@ -255,6 +255,8 @@ export interface Message {
    * cue (renders with a "↩ button reply" affordance).
    */
   interactive_reply_id?: string;
+  /** Meta's reason for the rejection — only set when status === 'failed'. */
+  error_message?: string | null;
 }
 
 export type ReactionActor = 'customer' | 'agent';
