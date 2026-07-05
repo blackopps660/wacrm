@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../../lib/supabase';
+import { useAuth } from '../../../hooks/use-auth';
 import {
   loadTags,
   loadLifecycleStages,
@@ -22,6 +23,7 @@ import type { Contact, Tag, LifecycleStage } from '../../../lib/types';
 
 export default function ContactsListScreen() {
   const router = useRouter();
+  const { accountId } = useAuth();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [stages, setStages] = useState<LifecycleStage[]>([]);
@@ -39,10 +41,12 @@ export default function ContactsListScreen() {
   // protection the web page uses.
   const fetchSeq = useRef(0);
 
+  // Re-fetch on accountId change too (Phase 4 workspace switch) — tags
+  // and lifecycle stages are account-scoped, same as contacts below.
   useEffect(() => {
     loadTags(supabase).then(setTags).catch(console.error);
     loadLifecycleStages(supabase).then(setStages).catch(console.error);
-  }, []);
+  }, [accountId]);
 
   const fetchPage = useCallback(
     async (targetPage: number, append: boolean) => {
@@ -70,14 +74,14 @@ export default function ContactsListScreen() {
     [search, selectedTagIds, selectedStageId, tags],
   );
 
-  // Re-fetch page 0 whenever filters change (tags must be loaded first
-  // so hydration has a map to work with).
+  // Re-fetch page 0 whenever filters (or the active workspace) change —
+  // tags must be loaded first so hydration has a map to work with.
   useEffect(() => {
     if (tags.length === 0 && stages.length === 0) return;
     setLoading(true);
     fetchPage(0, false).finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, selectedTagIds, selectedStageId, tags]);
+  }, [search, selectedTagIds, selectedStageId, tags, accountId]);
 
   async function onRefresh() {
     setRefreshing(true);

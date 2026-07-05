@@ -72,7 +72,7 @@ function MetricCard({
 }
 
 export default function DashboardScreen() {
-  const { defaultCurrency } = useAuth();
+  const { defaultCurrency, accountId } = useAuth();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [rangeDays, setRangeDays] = useState<(typeof RANGE_OPTIONS)[number]>(7);
@@ -108,10 +108,14 @@ export default function DashboardScreen() {
     [],
   );
 
+  // `accountId` is a dependency (not just read) so switching workspace
+  // (Phase 4) re-fetches everything under the new account — tab
+  // screens stay mounted across navigation, so a route change alone
+  // doesn't re-run this effect the way a full page reload would.
   useEffect(() => {
     setLoading(true);
     loadAll(rangeDays).finally(() => setLoading(false));
-  }, [rangeDays, loadAll]);
+  }, [rangeDays, loadAll, accountId]);
 
   async function onRefresh() {
     setRefreshing(true);

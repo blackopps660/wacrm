@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../../lib/supabase';
+import { useAuth } from '../../../hooks/use-auth';
 import { useRealtime } from '../../../hooks/use-realtime';
 import type { Conversation } from '../../../lib/types';
 
@@ -21,6 +22,7 @@ const CONVERSATION_SELECT = '*, contact:contacts(*)';
 
 export default function InboxListScreen() {
   const router = useRouter();
+  const { accountId } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -39,9 +41,13 @@ export default function InboxListScreen() {
     setConversations((data as unknown as Conversation[]) ?? []);
   }, []);
 
+  // `accountId` dependency so switching workspace (Phase 4) re-fetches
+  // under the new account — tab screens stay mounted across
+  // navigation, so a route change alone won't re-run this.
   useEffect(() => {
+    setLoading(true);
     fetchConversations().finally(() => setLoading(false));
-  }, [fetchConversations]);
+  }, [fetchConversations, accountId]);
 
   // Live updates while the list is open — new/changed conversations
   // (new inbound message, unread count, status) refresh the whole list.
