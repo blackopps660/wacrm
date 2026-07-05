@@ -10,6 +10,9 @@ export default function SettingsLayout() {
     >
       <Stack.Screen name="index" options={{ title: 'Settings' }} />
       <Stack.Screen name="workspaces" options={{ title: 'Switch Workspace' }} />
+      <Stack.Screen name="profile" options={{ title: 'Your Profile' }} />
+      <Stack.Screen name="team" options={{ title: 'Team Members' }} />
+      <Stack.Screen name="whatsapp" options={{ title: 'WhatsApp Status' }} />
     </Stack>
   );
 }

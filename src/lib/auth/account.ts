@@ -28,7 +28,7 @@
 import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createClientForRequest } from "@/lib/supabase/server";
 import { hasMinRole, isAccountRole, type AccountRole } from "./roles";
 
 // ------------------------------------------------------------
@@ -100,16 +100,24 @@ export interface AccountContext {
  * against profile rows that pre-date the backfill or were
  * inserted by hand).
  *
- * Use `requireRole(min)` instead when the route also needs a
- * minimum-role check — it's a thin wrapper over this.
+ * Pass the route's `request` object to also accept a mobile
+ * client's `Authorization: Bearer <token>` header (see
+ * createClientForRequest in lib/supabase/server.ts) — omitted,
+ * this falls back to the web app's cookie-only session exactly as
+ * before, so existing callers are unaffected.
+ *
+ * Use `requireRole(min, request?)` instead when the route also
+ * needs a minimum-role check — it's a thin wrapper over this.
  */
-export async function getCurrentAccount(): Promise<AccountContext> {
-  const supabase = await createClient();
+export async function getCurrentAccount(request?: Request): Promise<AccountContext> {
+  const { supabase, bearerToken } = request
+    ? await createClientForRequest(request)
+    : { supabase: await createClient(), bearerToken: undefined };
 
   const {
     data: { user },
     error: userErr,
-  } = await supabase.auth.getUser();
+  } = await supabase.auth.getUser(bearerToken);
   if (userErr || !user) {
     throw new UnauthorizedError();
   }
@@ -179,8 +187,8 @@ export async function getCurrentAccount(): Promise<AccountContext> {
  * `getCurrentAccount`, plus `ForbiddenError("Insufficient role")`
  * when the caller is below `min`.
  */
-export async function requireRole(min: AccountRole): Promise<AccountContext> {
-  const ctx = await getCurrentAccount();
+export async function requireRole(min: AccountRole, request?: Request): Promise<AccountContext> {
+  const ctx = await getCurrentAccount(request);
   if (!hasMinRole(ctx.role, min)) {
     throw new ForbiddenError(
       `This action requires the '${min}' role or higher`,

@@ -43,9 +43,9 @@ interface ProfileRow {
   avatar_url: string | null;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const ctx = await getCurrentAccount();
+    const ctx = await getCurrentAccount(request);
 
     const { data: memberships, error: membershipsErr } = await ctx.supabase
       .from("account_memberships")

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
-import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { createClient, createClientForRequest } from '@/lib/supabase/server'
+import { createClient as createAdminClient, type SupabaseClient } from '@supabase/supabase-js'
 import {
   registerPhoneNumber,
   subscribeWabaToApp,
@@ -19,7 +19,7 @@ import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
  * should treat that the same as "not connected".
  */
 async function resolveAccountId(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: SupabaseClient,
   userId: string,
 ): Promise<string | null> {
   const { data, error } = await supabase
@@ -60,14 +60,14 @@ function supabaseAdmin() {
  *   { connected: false, reason: 'token_corrupted',  message: '...', needs_reset: true }
  *   { connected: false, reason: 'meta_api_error',   message: '...' }
  */
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const supabase = await createClient()
+    const { supabase, bearerToken } = await createClientForRequest(request)
 
     const {
       data: { user },
       error: authError,
-    } = await supabase.auth.getUser()
+    } = await supabase.auth.getUser(bearerToken)
 
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

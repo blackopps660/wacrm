@@ -47,7 +47,7 @@ export async function PATCH(
   { params }: { params: Promise<{ userId: string }> },
 ) {
   try {
-    const ctx = await requireRole("admin");
+    const ctx = await requireRole("admin", request);
 
     const limit = checkRateLimit(
       `admin:memberRole:${ctx.userId}`,
@@ -95,11 +95,11 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ userId: string }> },
 ) {
   try {
-    const ctx = await requireRole("admin");
+    const ctx = await requireRole("admin", request);
 
     const limit = checkRateLimit(
       `admin:memberRemove:${ctx.userId}`,
