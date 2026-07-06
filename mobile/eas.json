@@ -10,11 +10,21 @@
     },
     "preview": {
       "developmentClient": false,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://chnhltgldeneaoeinhyo.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNobmhsdGdsZGVuZWFvZWluaHlvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwODQ0NjYsImV4cCI6MjA5ODY2MDQ2Nn0.8a06-cEAOQvFoGu7qOqUOXQndDK5p-QXeIAuZH38YSk",
+        "EXPO_PUBLIC_API_BASE_URL": "https://blinkmoon.io"
+      }
     },
     "production": {
       "developmentClient": false,
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://chnhltgldeneaoeinhyo.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNobmhsdGdsZGVuZWFvZWluaHlvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwODQ0NjYsImV4cCI6MjA5ODY2MDQ2Nn0.8a06-cEAOQvFoGu7qOqUOXQndDK5p-QXeIAuZH38YSk",
+        "EXPO_PUBLIC_API_BASE_URL": "https://blinkmoon.io"
+      }
     }
   },
   "submit": {
