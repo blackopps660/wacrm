@@ -9,9 +9,11 @@
       "distribution": "internal"
     },
     "preview": {
+      "developmentClient": false,
       "distribution": "internal"
     },
     "production": {
+      "developmentClient": false,
       "autoIncrement": true
     }
   },
