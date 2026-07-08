@@ -344,10 +344,17 @@ export default function MessageThreadScreen() {
   }
 
   return (
+    // On Android this screen relies purely on the native
+    // `windowSoftInputMode="adjustPan"` (set in app.json) to keep the
+    // composer above the keyboard. Also running KeyboardAvoidingView's
+    // own JS-side compensation here — on top of the OS already panning
+    // the whole window — double-shifted the layout and hid the
+    // composer behind the keyboard entirely. iOS has no native
+    // equivalent, so it still needs the JS-side "padding" behavior.
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={90}
     >
       <View style={[styles.customHeader, { paddingTop: insets.top + spacing.sm }]}>
         <View style={styles.headerTopRow}>
