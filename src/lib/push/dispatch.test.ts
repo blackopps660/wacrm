@@ -18,12 +18,23 @@ vi.mock('expo-server-sdk', () => ({
 
 import { dispatchPushForNewMessage } from './dispatch';
 
-function makeDb(tokenRows: { expo_push_token: string }[]) {
-  const from = () => ({
-    select: () => ({
-      eq: () => Promise.resolve({ data: tokenRows, error: null }),
-    }),
-  });
+function makeDb(tokenRows: { expo_push_token: string }[], unreadCount = 1) {
+  const from = (table: string) => {
+    if (table === 'conversations') {
+      return {
+        select: () => ({
+          eq: () => ({
+            maybeSingle: () => Promise.resolve({ data: { unread_count: unreadCount }, error: null }),
+          }),
+        }),
+      };
+    }
+    return {
+      select: () => ({
+        eq: () => Promise.resolve({ data: tokenRows, error: null }),
+      }),
+    };
+  };
   return { from } as unknown as SupabaseClient;
 }
 
@@ -66,6 +77,8 @@ describe('dispatchPushForNewMessage', () => {
         title: 'Ahsan',
         body: 'Hello there',
         data: { conversationId: 'conv-1' },
+        tag: 'conv-1',
+        collapseId: 'conv-1',
       },
     ]);
   });
@@ -79,6 +92,17 @@ describe('dispatchPushForNewMessage', () => {
     const [messages] = sendPushNotificationsAsync.mock.calls[0];
     expect(messages[0].body.length).toBeLessThan(longText.length);
     expect(messages[0].body.endsWith('…')).toBe(true);
+  });
+
+  it('groups under one notification with a count when the conversation has multiple unread messages', async () => {
+    await dispatchPushForNewMessage(
+      makeDb([{ expo_push_token: 'ExponentPushToken[abc]' }], 3),
+      baseArgs,
+    );
+    const [messages] = sendPushNotificationsAsync.mock.calls[0];
+    expect(messages[0].body).toBe('3 new messages · Hello there');
+    expect(messages[0].tag).toBe('conv-1');
+    expect(messages[0].collapseId).toBe('conv-1');
   });
 
   it('never throws even if the DB query fails', async () => {

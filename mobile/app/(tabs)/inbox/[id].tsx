@@ -9,13 +9,21 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Modal,
 } from 'react-native';
-import { useLocalSearchParams, useNavigation } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useAudioPlayer } from 'expo-audio';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase, apiFetch } from '../../../lib/supabase';
 import { useRealtime } from '../../../hooks/use-realtime';
+import { loadLifecycleStages } from '../../../lib/contacts/queries';
+import { AudioMessage } from '../../../components/AudioMessage';
 import { colors, radius, spacing } from '../../../lib/theme';
-import type { Message } from '../../../lib/types';
+import type { Message, Contact, LifecycleStage } from '../../../lib/types';
+
+const sendSound = require('../../../assets/sounds/send.wav');
+const receiveSound = require('../../../assets/sounds/receive.wav');
 
 // A message still in flight — rendered immediately on send so the UI
 // never waits on the Meta round-trip before showing feedback (matches
@@ -45,14 +53,23 @@ function dateLabel(iso: string): string {
   return date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
+function MessageContent({ item, isAgent }: { item: Message; isAgent: boolean }) {
+  if (item.content_type === 'audio' && item.media_url) {
+    return <AudioMessage url={item.media_url} tint={isAgent ? 'agent' : 'customer'} />;
+  }
+  return (
+    <Text style={isAgent ? styles.bubbleTextAgent : styles.bubbleTextCustomer}>
+      {item.content_text || `[${item.content_type}]`}
+    </Text>
+  );
+}
+
 const MessageBubble = memo(function MessageBubble({ item }: { item: Message }) {
   const isAgent = item.sender_type === 'agent' || item.sender_type === 'bot';
   return (
     <View style={[styles.bubbleRow, isAgent ? styles.bubbleRowAgent : styles.bubbleRowCustomer]}>
       <View style={[styles.bubble, isAgent ? styles.bubbleAgent : styles.bubbleCustomer]}>
-        <Text style={isAgent ? styles.bubbleTextAgent : styles.bubbleTextCustomer}>
-          {item.content_text || `[${item.content_type}]`}
-        </Text>
+        <MessageContent item={item} isAgent={isAgent} />
         <View style={styles.bubbleFooter}>
           <Text style={isAgent ? styles.bubbleTimeAgent : styles.bubbleTimeCustomer}>
             {new Date(item.created_at).toLocaleTimeString(undefined, {
@@ -119,14 +136,24 @@ const DateSeparator = memo(function DateSeparator({ label }: { label: string }) 
 
 export default function MessageThreadScreen() {
   const { id: conversationId } = useLocalSearchParams<{ id: string }>();
-  const navigation = useNavigation();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [pending, setPending] = useState<PendingMessage[]>([]);
+  const [contact, setContact] = useState<Contact | null>(null);
+  const [stages, setStages] = useState<LifecycleStage[]>([]);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [stagePickerOpen, setStagePickerOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const listRef = useRef<FlatList<ListItem>>(null);
+
+  const sendPlayer = useAudioPlayer(sendSound);
+  const receivePlayer = useAudioPlayer(receiveSound);
 
   const fetchMessages = useCallback(async () => {
     const { data, error } = await supabase
@@ -143,33 +170,31 @@ export default function MessageThreadScreen() {
     setMessages((data as Message[]) ?? []);
   }, [conversationId]);
 
-  // Load thread + contact name for the header, mark read on open.
+  const fetchContact = useCallback(async () => {
+    const { data: conv } = await supabase
+      .from('conversations')
+      .select('unread_count, contact:contacts(*)')
+      .eq('id', conversationId)
+      .maybeSingle();
+
+    const contactRow = conv?.contact as unknown as Contact | null;
+    setContact(contactRow);
+
+    if (conv && conv.unread_count > 0) {
+      await supabase.from('conversations').update({ unread_count: 0 }).eq('id', conversationId);
+    }
+  }, [conversationId]);
+
+  // Load thread + contact, mark read on open.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       await fetchMessages();
       if (cancelled) return;
       setLoading(false);
-
-      const { data: conv } = await supabase
-        .from('conversations')
-        .select('unread_count, contact:contacts(name, phone)')
-        .eq('id', conversationId)
-        .maybeSingle();
-
-      if (cancelled) return;
-      const contact = conv?.contact as unknown as
-        | { name?: string; phone?: string }
-        | null;
-      navigation.setOptions({ title: contact?.name || contact?.phone || 'Conversation' });
-
-      if (conv && conv.unread_count > 0) {
-        await supabase
-          .from('conversations')
-          .update({ unread_count: 0 })
-          .eq('id', conversationId);
-      }
+      await fetchContact();
     })();
+    loadLifecycleStages(supabase).then(setStages).catch(console.error);
     return () => {
       cancelled = true;
     };
@@ -185,9 +210,12 @@ export default function MessageThreadScreen() {
         setMessages((prev) =>
           prev.some((m) => m.id === row.id) ? prev : [...prev, row],
         );
-        // The real row arrived — drop the oldest matching pending
-        // bubble so we don't show the same text twice.
-        if (row.sender_type === 'agent' || row.sender_type === 'bot') {
+        if (row.sender_type === 'customer') {
+          receivePlayer.seekTo(0);
+          receivePlayer.play();
+        } else if (row.sender_type === 'agent' || row.sender_type === 'bot') {
+          // The real row arrived — drop the oldest matching pending
+          // bubble so we don't show the same text twice.
           setPending((prev) => {
             const idx = prev.findIndex((p) => p.content === row.content_text);
             if (idx === -1) return prev;
@@ -225,9 +253,7 @@ export default function MessageThreadScreen() {
         return;
       }
       // Success: the real row lands via realtime and reconciles the
-      // pending bubble away (see onMessageEvent above). Nothing to do
-      // here — leaving the pending bubble in place briefly is fine,
-      // it's visually identical to the real one until it's replaced.
+      // pending bubble away. Nothing to do here.
     } catch (err) {
       setSendError(err instanceof Error ? err.message : 'Failed to send message');
       setPending((prev) =>
@@ -238,8 +264,10 @@ export default function MessageThreadScreen() {
 
   function handleSend() {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed || contact?.blocked_at) return;
     setText('');
+    sendPlayer.seekTo(0);
+    sendPlayer.play();
     const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     setPending((prev) => [
       ...prev,
@@ -254,12 +282,42 @@ export default function MessageThreadScreen() {
     void sendText(item.content, item.tempId);
   }
 
+  async function handleChangeStage(stage: LifecycleStage | null) {
+    if (!contact) return;
+    setStagePickerOpen(false);
+    const { error } = await supabase
+      .from('contacts')
+      .update({ lifecycle_stage_id: stage?.id ?? null })
+      .eq('id', contact.id);
+    if (!error) {
+      setContact({ ...contact, lifecycle_stage_id: stage?.id ?? null, lifecycle_stage: stage });
+    }
+  }
+
+  async function handleToggleBlock() {
+    if (!contact) return;
+    setMenuOpen(false);
+    const blocking = !contact.blocked_at;
+    const { error } = await supabase
+      .from('contacts')
+      .update({ blocked_at: blocking ? new Date().toISOString() : null })
+      .eq('id', contact.id);
+    if (!error) {
+      setContact({ ...contact, blocked_at: blocking ? new Date().toISOString() : null });
+    }
+  }
+
   // Flattens messages + in-flight pending bubbles into one list with
   // WhatsApp-style date separators inserted between day boundaries.
   const listData = useMemo<ListItem[]>(() => {
+    const term = searchQuery.trim().toLowerCase();
+    const visibleMessages = term
+      ? messages.filter((m) => m.content_text?.toLowerCase().includes(term))
+      : messages;
+
     const items: ListItem[] = [];
     let lastDay: string | null = null;
-    for (const m of messages) {
+    for (const m of visibleMessages) {
       const day = dateLabel(m.created_at);
       if (day !== lastDay) {
         items.push({ kind: 'date', id: `date-${day}-${m.id}`, label: day });
@@ -267,11 +325,15 @@ export default function MessageThreadScreen() {
       }
       items.push({ kind: 'message', id: m.id, message: m });
     }
-    for (const p of pending) {
-      items.push({ kind: 'pending', id: p.tempId, pending: p });
+    if (!term) {
+      for (const p of pending) {
+        items.push({ kind: 'pending', id: p.tempId, pending: p });
+      }
     }
     return items;
-  }, [messages, pending]);
+  }, [messages, pending, searchQuery]);
+
+  const isSearching = searchQuery.trim().length > 0;
 
   if (loading) {
     return (
@@ -287,12 +349,76 @@ export default function MessageThreadScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
+      <View style={[styles.customHeader, { paddingTop: insets.top + spacing.sm }]}>
+        <View style={styles.headerTopRow}>
+          <Pressable onPress={() => router.back()} hitSlop={8} style={styles.backButton}>
+            <Ionicons name="chevron-back" size={24} color={colors.text} />
+          </Pressable>
+          <Text style={styles.headerName} numberOfLines={1}>
+            {contact?.name || contact?.phone || 'Conversation'}
+          </Text>
+          <View style={styles.headerActions}>
+            <Pressable
+              style={styles.headerIconButton}
+              onPress={() => setSearchOpen((v) => !v)}
+              hitSlop={8}
+            >
+              <Ionicons name={searchOpen ? 'close' : 'search'} size={20} color={colors.textSecondary} />
+            </Pressable>
+            <Pressable style={styles.headerIconButton} onPress={() => setMenuOpen(true)} hitSlop={8}>
+              <Ionicons name="ellipsis-vertical" size={20} color={colors.textSecondary} />
+            </Pressable>
+          </View>
+        </View>
+        <Pressable
+          style={styles.stagePill}
+          onPress={() => setStagePickerOpen(true)}
+        >
+          <View
+            style={[
+              styles.stageDot,
+              { backgroundColor: contact?.lifecycle_stage?.color ?? colors.borderStrong },
+            ]}
+          />
+          <Text style={styles.stagePillText} numberOfLines={1}>
+            {contact?.lifecycle_stage?.name ?? 'Set stage'}
+          </Text>
+          <Ionicons name="chevron-down" size={12} color={colors.textFaint} />
+        </Pressable>
+      </View>
+
+      {searchOpen && (
+        <View style={styles.searchRow}>
+          <Ionicons name="search" size={16} color={colors.textFaint} style={{ marginRight: spacing.sm }} />
+          <TextInput
+            autoFocus
+            style={styles.searchInput}
+            placeholder="Search in this chat…"
+            placeholderTextColor={colors.textFaint}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {isSearching && (
+            <Text style={styles.searchCount}>
+              {listData.filter((i) => i.kind === 'message').length}
+            </Text>
+          )}
+        </View>
+      )}
+
+      {contact?.blocked_at && (
+        <View style={styles.blockedBanner}>
+          <Ionicons name="ban" size={14} color={colors.dangerMuted} />
+          <Text style={styles.blockedBannerText}>You've blocked this contact — sending is disabled.</Text>
+        </View>
+      )}
+
       <FlatList
         ref={listRef}
         data={listData}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
-        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+        onContentSizeChange={() => !isSearching && listRef.current?.scrollToEnd({ animated: false })}
         renderItem={({ item }) => {
           if (item.kind === 'date') return <DateSeparator label={item.label} />;
           if (item.kind === 'pending') {
@@ -307,6 +433,13 @@ export default function MessageThreadScreen() {
           }
           return <MessageBubble item={item.message} />;
         }}
+        ListEmptyComponent={
+          isSearching ? (
+            <View style={styles.center}>
+              <Text style={styles.emptyText}>No messages match &quot;{searchQuery}&quot;</Text>
+            </View>
+          ) : null
+        }
         initialNumToRender={20}
         maxToRenderPerBatch={20}
         windowSize={10}
@@ -318,27 +451,93 @@ export default function MessageThreadScreen() {
         </View>
       )}
 
-      <View style={styles.composer}>
-        <TextInput
-          style={styles.composerInput}
-          placeholder="Type a message…"
-          placeholderTextColor={colors.textFaint}
-          value={text}
-          onChangeText={setText}
-          multiline
-        />
-        <Pressable
-          style={({ pressed }) => [
-            styles.sendButton,
-            !text.trim() && styles.sendButtonDisabled,
-            pressed && styles.sendButtonPressed,
-          ]}
-          onPress={handleSend}
-          disabled={!text.trim()}
-        >
-          <Ionicons name="send" size={17} color={colors.white} />
+      {!contact?.blocked_at && (
+        <View style={styles.composer}>
+          <TextInput
+            style={styles.composerInput}
+            placeholder="Type a message…"
+            placeholderTextColor={colors.textFaint}
+            value={text}
+            onChangeText={setText}
+            multiline
+          />
+          <Pressable
+            style={({ pressed }) => [
+              styles.sendButton,
+              !text.trim() && styles.sendButtonDisabled,
+              pressed && styles.sendButtonPressed,
+            ]}
+            onPress={handleSend}
+            disabled={!text.trim()}
+          >
+            <Ionicons name="send" size={17} color={colors.white} />
+          </Pressable>
+        </View>
+      )}
+
+      {/* 3-dot action menu */}
+      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setMenuOpen(false)}>
+          <View style={styles.menuCard}>
+            <Pressable
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuOpen(false);
+                if (contact) router.push(`/contacts/${contact.id}`);
+              }}
+            >
+              <Ionicons name="person-circle-outline" size={20} color={colors.textSecondary} />
+              <Text style={styles.menuItemText}>View Contact Profile</Text>
+            </Pressable>
+            <Pressable
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuOpen(false);
+                setStagePickerOpen(true);
+              }}
+            >
+              <Ionicons name="pricetag-outline" size={20} color={colors.textSecondary} />
+              <Text style={styles.menuItemText}>Change Lifecycle Stage</Text>
+            </Pressable>
+            <Pressable style={styles.menuItem} onPress={handleToggleBlock}>
+              <Ionicons
+                name={contact?.blocked_at ? 'checkmark-circle-outline' : 'ban-outline'}
+                size={20}
+                color={contact?.blocked_at ? colors.success : colors.dangerMuted}
+              />
+              <Text
+                style={[styles.menuItemText, { color: contact?.blocked_at ? colors.success : colors.dangerMuted }]}
+              >
+                {contact?.blocked_at ? 'Unblock Contact' : 'Block Contact'}
+              </Text>
+            </Pressable>
+          </View>
         </Pressable>
-      </View>
+      </Modal>
+
+      {/* Lifecycle stage picker */}
+      <Modal
+        visible={stagePickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setStagePickerOpen(false)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setStagePickerOpen(false)}>
+          <View style={styles.menuCard}>
+            <Text style={styles.menuTitle}>Lifecycle Stage</Text>
+            <Pressable style={styles.menuItem} onPress={() => handleChangeStage(null)}>
+              <View style={[styles.stageDot, { backgroundColor: colors.borderStrong }]} />
+              <Text style={styles.menuItemText}>Unassigned</Text>
+            </Pressable>
+            {stages.map((s) => (
+              <Pressable key={s.id} style={styles.menuItem} onPress={() => handleChangeStage(s)}>
+                <View style={[styles.stageDot, { backgroundColor: s.color }]} />
+                <Text style={styles.menuItemText}>{s.name}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </Pressable>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -346,6 +545,63 @@ export default function MessageThreadScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  customHeader: {
+    paddingHorizontal: spacing.sm + 2,
+    paddingBottom: spacing.sm,
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    gap: spacing.sm,
+  },
+  headerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  backButton: { padding: 4 },
+  headerName: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  stagePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    backgroundColor: colors.bg,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 5,
+    marginLeft: spacing.xl + spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    maxWidth: '70%',
+  },
+  stagePillText: { color: colors.textSecondary, fontSize: 12, fontWeight: '500', flexShrink: 1 },
+  headerActions: { flexDirection: 'row', gap: spacing.sm },
+  headerIconButton: { padding: 4 },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  searchInput: { flex: 1, color: colors.text, fontSize: 14, paddingVertical: 4 },
+  searchCount: { color: colors.textFaint, fontSize: 12, marginLeft: spacing.sm },
+  blockedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.dangerBg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  blockedBannerText: { color: colors.dangerMuted, fontSize: 12, flex: 1 },
   listContent: { padding: spacing.md, gap: 6 },
   dateSeparator: { alignItems: 'center', marginVertical: spacing.sm },
   dateSeparatorText: {
@@ -387,6 +643,7 @@ const styles = StyleSheet.create({
   bubbleTimeAgent: { color: 'rgba(255,255,255,0.7)', fontSize: 10 },
   bubbleTimeCustomer: { color: colors.textFaint, fontSize: 10 },
   failedText: { color: colors.dangerMuted, fontSize: 11, marginTop: 4 },
+  emptyText: { color: colors.textFaint, fontSize: 13 },
   errorBar: {
     backgroundColor: colors.dangerBg,
     paddingVertical: spacing.sm,
@@ -424,4 +681,37 @@ const styles = StyleSheet.create({
   },
   sendButtonPressed: { opacity: 0.85 },
   sendButtonDisabled: { opacity: 0.5 },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  menuCard: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xl,
+    gap: 4,
+    maxHeight: '70%',
+  },
+  menuTitle: {
+    color: colors.textFaint,
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    marginBottom: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  menuItemText: { color: colors.textSecondary, fontSize: 15 },
+  stageDot: { width: 8, height: 8, borderRadius: 4 },
 });

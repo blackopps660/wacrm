@@ -48,6 +48,28 @@ export async function dispatchPushForNewMessage(
     }
     if (!tokenRows || tokenRows.length === 0) return
 
+    // WhatsApp-style grouping: one notification per conversation, not
+    // one per message. `conversations.unread_count` is already the
+    // running tally of unseen messages for this thread (bumped by the
+    // webhook handler before this runs) — reuse it as the "N messages"
+    // count instead of tracking a separate counter. `tag` (Android) /
+    // `collapseId` (the cross-platform field Expo maps to iOS's
+    // apns-collapse-id) makes a new push REPLACE the previous one for
+    // the same conversation in the tray rather than stacking beside it.
+    const { data: convRow } = await db
+      .from('conversations')
+      .select('unread_count')
+      .eq('id', conversationId)
+      .maybeSingle()
+    const unreadCount = (convRow as { unread_count: number } | null)?.unread_count ?? 1
+
+    const truncatedPreview =
+      previewText.length > PREVIEW_MAX_LENGTH
+        ? `${previewText.slice(0, PREVIEW_MAX_LENGTH)}…`
+        : previewText
+    const body =
+      unreadCount > 1 ? `${unreadCount} new messages · ${truncatedPreview}` : truncatedPreview
+
     const expo = expoClient()
     const messages: ExpoPushMessage[] = []
 
@@ -61,11 +83,10 @@ export async function dispatchPushForNewMessage(
         to: token,
         sound: 'default',
         title: senderName,
-        body:
-          previewText.length > PREVIEW_MAX_LENGTH
-            ? `${previewText.slice(0, PREVIEW_MAX_LENGTH)}…`
-            : previewText,
+        body,
         data: { conversationId },
+        tag: conversationId,
+        collapseId: conversationId,
       })
     }
 

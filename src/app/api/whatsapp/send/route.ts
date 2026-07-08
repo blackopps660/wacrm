@@ -165,6 +165,28 @@ export async function POST(request: Request) {
       )
     }
 
+    // Reject sends to a contact this account has blocked (mobile chat
+    // header's 3-dot menu — migration 047). Inbound messages from a
+    // blocked contact still land normally; only outbound is stopped.
+    const { data: convForBlockCheck } = await supabase
+      .from('conversations')
+      .select('contact:contacts(blocked_at)')
+      .eq('id', conversationId)
+      .maybeSingle()
+    const blockedContact = convForBlockCheck?.contact as unknown as
+      | { blocked_at: string | null }
+      | { blocked_at: string | null }[]
+      | null
+    const isBlocked = Array.isArray(blockedContact)
+      ? blockedContact[0]?.blocked_at != null
+      : blockedContact?.blocked_at != null
+    if (isBlocked) {
+      return NextResponse.json(
+        { error: 'This contact is blocked. Unblock them before sending a message.' },
+        { status: 403 }
+      )
+    }
+
     // Delegate to the shared send core (validates, sends to Meta with
     // phone-variant retry, persists, pauses active flow runs). Its
     // `SendMessageError` carries a machine code + HTTP status; the

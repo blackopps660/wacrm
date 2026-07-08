@@ -122,6 +122,8 @@ export interface Contact {
   /** Hydrated by queries that embed `lifecycle_stage:lifecycle_stages(*)`.
    *  Absent otherwise. */
   lifecycle_stage?: LifecycleStage | null;
+  /** Set when this account has blocked the contact (migration 047) — outbound sends are rejected until cleared. */
+  blocked_at?: string | null;
 }
 
 export interface Tag {

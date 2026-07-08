@@ -1,27 +1,30 @@
-import { useCallback, useEffect, useRef, useState, memo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
 import {
   View,
   Text,
   FlatList,
+  TextInput,
   Pressable,
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../../hooks/use-auth';
 import { useRealtime } from '../../../hooks/use-realtime';
+import { loadLifecycleStages } from '../../../lib/contacts/queries';
 import { Avatar } from '../../../components/Avatar';
-import { colors, spacing } from '../../../lib/theme';
-import type { Conversation } from '../../../lib/types';
+import { colors, radius, spacing } from '../../../lib/theme';
+import type { Conversation, LifecycleStage } from '../../../lib/types';
 
 const PAGE_SIZE = 30;
 const ROW_HEIGHT = 74;
 // Same embed shape as the web app's CONVERSATION_SELECT
-// (src/lib/inbox/conversations.ts), minus the tags join Phase 1
-// doesn't need yet.
-const CONVERSATION_SELECT = '*, contact:contacts(*)';
+// (src/lib/inbox/conversations.ts), plus the lifecycle stage join so
+// the filter chips below can match on it client-side.
+const CONVERSATION_SELECT = '*, contact:contacts(*, lifecycle_stage:lifecycle_stages(*))';
 
 const ConversationRow = memo(function ConversationRow({
   item,
@@ -62,6 +65,14 @@ const ConversationRow = memo(function ConversationRow({
             </View>
           )}
         </View>
+        {item.contact?.lifecycle_stage && (
+          <View style={styles.stageRow}>
+            <View style={[styles.stageDot, { backgroundColor: item.contact.lifecycle_stage.color }]} />
+            <Text style={styles.stageText} numberOfLines={1}>
+              {item.contact.lifecycle_stage.name}
+            </Text>
+          </View>
+        )}
       </View>
     </Pressable>
   );
@@ -71,6 +82,9 @@ export default function InboxListScreen() {
   const router = useRouter();
   const { accountId } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [stages, setStages] = useState<LifecycleStage[]>([]);
+  const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -95,6 +109,7 @@ export default function InboxListScreen() {
   useEffect(() => {
     setLoading(true);
     fetchConversations().finally(() => setLoading(false));
+    loadLifecycleStages(supabase).then(setStages).catch(console.error);
   }, [fetchConversations, accountId]);
 
   // Live updates while the list is open. A burst of several messages
@@ -129,6 +144,26 @@ export default function InboxListScreen() {
     [router],
   );
 
+  // Client-side — the list is already small (PAGE_SIZE=30, realtime-
+  // kept-fresh) so a network round-trip per keystroke would only add
+  // latency for no benefit.
+  const filtered = useMemo(() => {
+    let rows = conversations;
+    if (selectedStageId) {
+      rows = rows.filter((c) => c.contact?.lifecycle_stage_id === selectedStageId);
+    }
+    const term = search.trim().toLowerCase();
+    if (term) {
+      rows = rows.filter((c) => {
+        const name = c.contact?.name?.toLowerCase() ?? '';
+        const phone = c.contact?.phone?.toLowerCase() ?? '';
+        const preview = c.last_message_text?.toLowerCase() ?? '';
+        return name.includes(term) || phone.includes(term) || preview.includes(term);
+      });
+    }
+    return rows;
+  }, [conversations, selectedStageId, search]);
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -138,37 +173,116 @@ export default function InboxListScreen() {
   }
 
   return (
-    <FlatList
-      style={styles.container}
-      data={conversations}
-      keyExtractor={(item) => item.id}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
-      }
-      ListEmptyComponent={
-        <View style={styles.center}>
-          <Text style={styles.emptyText}>No conversations yet.</Text>
+    <View style={styles.container}>
+      <View style={styles.searchRow}>
+        <Ionicons name="search" size={17} color={colors.textFaint} style={styles.searchIcon} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search chats, contacts, messages…"
+          placeholderTextColor={colors.textFaint}
+          value={search}
+          onChangeText={setSearch}
+        />
+        {search.length > 0 && (
+          <Pressable onPress={() => setSearch('')} hitSlop={8}>
+            <Ionicons name="close-circle" size={17} color={colors.textFaint} />
+          </Pressable>
+        )}
+      </View>
+
+      {stages.length > 0 && (
+        <View style={styles.filterRow}>
+          <FlatList
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            data={stages}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={{ gap: spacing.sm, paddingHorizontal: spacing.lg }}
+            renderItem={({ item }) => {
+              const active = selectedStageId === item.id;
+              return (
+                <Pressable
+                  onPress={() => setSelectedStageId(active ? null : item.id)}
+                  style={[
+                    styles.filterChip,
+                    active && { backgroundColor: item.color, borderColor: item.color },
+                  ]}
+                >
+                  <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
+                    {item.name}
+                  </Text>
+                </Pressable>
+              );
+            }}
+          />
         </View>
-      }
-      renderItem={({ item }) => <ConversationRow item={item} onPress={handlePress} />}
-      getItemLayout={(_, index) => ({ length: ROW_HEIGHT, offset: ROW_HEIGHT * index, index })}
-      initialNumToRender={12}
-      maxToRenderPerBatch={12}
-      windowSize={7}
-      removeClippedSubviews
-    />
+      )}
+
+      <FlatList
+        style={styles.list}
+        data={filtered}
+        keyExtractor={(item) => item.id}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
+        }
+        ListEmptyComponent={
+          <View style={styles.center}>
+            <Text style={styles.emptyText}>
+              {search || selectedStageId ? 'No matching conversations' : 'No conversations yet.'}
+            </Text>
+          </View>
+        }
+        renderItem={({ item }) => <ConversationRow item={item} onPress={handlePress} />}
+        getItemLayout={(_, index) => ({ length: ROW_HEIGHT, offset: ROW_HEIGHT * index, index })}
+        initialNumToRender={12}
+        maxToRenderPerBatch={12}
+        windowSize={7}
+        removeClippedSubviews
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    margin: spacing.lg,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+  },
+  searchIcon: { marginRight: spacing.sm },
+  searchInput: {
+    flex: 1,
+    paddingVertical: spacing.sm + 2,
+    color: colors.text,
+    fontSize: 15,
+  },
+  filterRow: { paddingBottom: spacing.sm },
+  filterChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+  },
+  filterChipText: { color: colors.textMuted, fontSize: 12 },
+  filterChipTextActive: { color: colors.white, fontWeight: '600' },
+  list: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
   emptyText: { color: colors.textFaint },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
-    height: ROW_HEIGHT,
+    minHeight: ROW_HEIGHT,
+    paddingVertical: spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     gap: spacing.md,
@@ -192,4 +306,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5,
   },
   unreadBadgeText: { color: colors.white, fontSize: 11, fontWeight: '700' },
+  stageRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },
+  stageDot: { width: 6, height: 6, borderRadius: 3 },
+  stageText: { color: colors.textFaint, fontSize: 10 },
 });

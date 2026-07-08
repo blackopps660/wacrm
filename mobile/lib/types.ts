@@ -43,6 +43,7 @@ export interface Contact {
   tags?: Tag[];
   lifecycle_stage_id?: string | null;
   lifecycle_stage?: LifecycleStage | null;
+  blocked_at?: string | null;
 }
 
 export type ConversationStatus = 'open' | 'pending' | 'closed';
