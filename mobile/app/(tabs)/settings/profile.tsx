@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet, ActivityIndicator, Image } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../../hooks/use-auth';
+import { useAppTheme } from '../../../hooks/use-theme';
+import { scaleFontSizes, type Palette } from '../../../lib/theme';
 
 // Ported from src/components/settings/profile-form.tsx (web app) —
 // same avatars bucket + path convention (`${user.id}/avatar-<ts>.<ext>`),
@@ -14,6 +16,8 @@ const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 
 export default function ProfileScreen() {
   const { user, profile, refreshProfile } = useAuth();
+  const { colors, fontScale } = useAppTheme();
+  const styles = useMemo(() => scaleFontSizes(makeStyles(colors), fontScale), [colors, fontScale]);
 
   const [fullName, setFullName] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -142,7 +146,7 @@ export default function ProfileScreen() {
         value={fullName}
         onChangeText={setFullName}
         placeholder="Your name"
-        placeholderTextColor="#64748b"
+        placeholderTextColor={colors.textFaint}
       />
 
       <Text style={styles.label}>Email</Text>
@@ -154,7 +158,7 @@ export default function ProfileScreen() {
         disabled={saving || !fullName.trim()}
       >
         {saving ? (
-          <ActivityIndicator color="#fff" size="small" />
+          <ActivityIndicator color={colors.white} size="small" />
         ) : (
           <Text style={styles.saveButtonText}>Save changes</Text>
         )}
@@ -163,47 +167,49 @@ export default function ProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617', padding: 16 },
-  errorBox: { backgroundColor: 'rgba(239,68,68,0.1)', borderRadius: 8, padding: 10, marginBottom: 12 },
-  errorText: { color: '#fca5a5', fontSize: 12 },
-  successBox: { backgroundColor: 'rgba(74,222,128,0.1)', borderRadius: 8, padding: 10, marginBottom: 12 },
-  successText: { color: '#86efac', fontSize: 12 },
-  avatarRow: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 20 },
-  avatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(124,58,237,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarImage: { width: 64, height: 64, borderRadius: 32 },
-  avatarInitial: { color: '#a78bfa', fontSize: 24, fontWeight: '700' },
-  changePhotoButton: {
-    borderWidth: 1,
-    borderColor: '#334155',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  changePhotoText: { color: '#e2e8f0', fontSize: 13, fontWeight: '500' },
-  label: { color: '#94a3b8', fontSize: 12, marginTop: 12 },
-  input: {
-    backgroundColor: '#1e293b',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: '#f8fafc',
-    marginTop: 4,
-  },
-  readonlyValue: { color: '#64748b', fontSize: 15, marginTop: 4 },
-  saveButton: {
-    marginTop: 24,
-    backgroundColor: '#7c3aed',
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  saveButtonText: { color: '#fff', fontWeight: '600' },
-});
+function makeStyles(colors: Palette) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.bg, padding: 16 },
+    errorBox: { backgroundColor: colors.dangerBg, borderRadius: 8, padding: 10, marginBottom: 12 },
+    errorText: { color: colors.dangerMuted, fontSize: 12 },
+    successBox: { backgroundColor: 'rgba(74,222,128,0.1)', borderRadius: 8, padding: 10, marginBottom: 12 },
+    successText: { color: colors.successMuted, fontSize: 12 },
+    avatarRow: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 20 },
+    avatar: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      backgroundColor: colors.primaryMuted,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    avatarImage: { width: 64, height: 64, borderRadius: 32 },
+    avatarInitial: { color: colors.accent, fontSize: 24, fontWeight: '700' },
+    changePhotoButton: {
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+      borderRadius: 8,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+    },
+    changePhotoText: { color: colors.textSecondary, fontSize: 13, fontWeight: '500' },
+    label: { color: colors.textMuted, fontSize: 12, marginTop: 12 },
+    input: {
+      backgroundColor: colors.surfaceRaised,
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      color: colors.text,
+      marginTop: 4,
+    },
+    readonlyValue: { color: colors.textFaint, fontSize: 15, marginTop: 4 },
+    saveButton: {
+      marginTop: 24,
+      backgroundColor: colors.primary,
+      borderRadius: 10,
+      paddingVertical: 14,
+      alignItems: 'center',
+    },
+    saveButtonText: { color: colors.white, fontWeight: '600' },
+  });
+}

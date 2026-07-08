@@ -13,10 +13,11 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../../hooks/use-auth';
+import { useAppTheme } from '../../../hooks/use-theme';
 import { useRealtime } from '../../../hooks/use-realtime';
 import { loadLifecycleStages } from '../../../lib/contacts/queries';
 import { Avatar } from '../../../components/Avatar';
-import { colors, radius, spacing } from '../../../lib/theme';
+import { radius, scaleFontSizes, spacing, type Palette } from '../../../lib/theme';
 import type { Conversation, LifecycleStage } from '../../../lib/types';
 
 const PAGE_SIZE = 30;
@@ -29,9 +30,11 @@ const CONVERSATION_SELECT = '*, contact:contacts(*, lifecycle_stage:lifecycle_st
 const ConversationRow = memo(function ConversationRow({
   item,
   onPress,
+  styles,
 }: {
   item: Conversation;
   onPress: (id: string) => void;
+  styles: ReturnType<typeof makeStyles>;
 }) {
   const isUnread = item.unread_count > 0;
   const label = item.contact?.name || item.contact?.phone || 'Unknown';
@@ -81,6 +84,8 @@ const ConversationRow = memo(function ConversationRow({
 export default function InboxListScreen() {
   const router = useRouter();
   const { accountId } = useAuth();
+  const { colors, fontScale } = useAppTheme();
+  const styles = useMemo(() => scaleFontSizes(makeStyles(colors), fontScale), [colors, fontScale]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [stages, setStages] = useState<LifecycleStage[]>([]);
   const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
@@ -232,7 +237,7 @@ export default function InboxListScreen() {
             </Text>
           </View>
         }
-        renderItem={({ item }) => <ConversationRow item={item} onPress={handlePress} />}
+        renderItem={({ item }) => <ConversationRow item={item} onPress={handlePress} styles={styles} />}
         getItemLayout={(_, index) => ({ length: ROW_HEIGHT, offset: ROW_HEIGHT * index, index })}
         initialNumToRender={12}
         maxToRenderPerBatch={12}
@@ -243,70 +248,72 @@ export default function InboxListScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    margin: spacing.lg,
-    marginBottom: spacing.sm,
-    backgroundColor: colors.surface,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.md,
-  },
-  searchIcon: { marginRight: spacing.sm },
-  searchInput: {
-    flex: 1,
-    paddingVertical: spacing.sm + 2,
-    color: colors.text,
-    fontSize: 15,
-  },
-  filterRow: { paddingBottom: spacing.sm },
-  filterChip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-  },
-  filterChipText: { color: colors.textMuted, fontSize: 12 },
-  filterChipTextActive: { color: colors.white, fontWeight: '600' },
-  list: { flex: 1 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
-  emptyText: { color: colors.textFaint },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    minHeight: ROW_HEIGHT,
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    gap: spacing.md,
-  },
-  rowPressed: { backgroundColor: colors.surface },
-  rowContent: { flex: 1, gap: 4 },
-  rowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  rowBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  name: { color: colors.textSecondary, fontSize: 15, fontWeight: '500', flexShrink: 1 },
-  unreadText: { color: colors.text, fontWeight: '700' },
-  time: { color: colors.textFaint, fontSize: 11 },
-  preview: { color: colors.textFaint, fontSize: 13, flex: 1, marginRight: spacing.sm },
-  unreadPreview: { color: colors.textMuted },
-  unreadBadge: {
-    backgroundColor: colors.primary,
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 5,
-  },
-  unreadBadgeText: { color: colors.white, fontSize: 11, fontWeight: '700' },
-  stageRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },
-  stageDot: { width: 6, height: 6, borderRadius: 3 },
-  stageText: { color: colors.textFaint, fontSize: 10 },
-});
+function makeStyles(colors: Palette) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.bg },
+    searchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      margin: spacing.lg,
+      marginBottom: spacing.sm,
+      backgroundColor: colors.surface,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: spacing.md,
+    },
+    searchIcon: { marginRight: spacing.sm },
+    searchInput: {
+      flex: 1,
+      paddingVertical: spacing.sm + 2,
+      color: colors.text,
+      fontSize: 15,
+    },
+    filterRow: { paddingBottom: spacing.sm },
+    filterChip: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: 6,
+      borderRadius: radius.pill,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+    },
+    filterChipText: { color: colors.textMuted, fontSize: 12 },
+    filterChipTextActive: { color: colors.white, fontWeight: '600' },
+    list: { flex: 1 },
+    center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
+    emptyText: { color: colors.textFaint },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: spacing.lg,
+      minHeight: ROW_HEIGHT,
+      paddingVertical: spacing.sm,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+      gap: spacing.md,
+    },
+    rowPressed: { backgroundColor: colors.surface },
+    rowContent: { flex: 1, gap: 4 },
+    rowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    rowBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    name: { color: colors.textSecondary, fontSize: 15, fontWeight: '500', flexShrink: 1 },
+    unreadText: { color: colors.text, fontWeight: '700' },
+    time: { color: colors.textFaint, fontSize: 11 },
+    preview: { color: colors.textFaint, fontSize: 13, flex: 1, marginRight: spacing.sm },
+    unreadPreview: { color: colors.textMuted },
+    unreadBadge: {
+      backgroundColor: colors.primary,
+      borderRadius: 10,
+      minWidth: 20,
+      height: 20,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 5,
+    },
+    unreadBadgeText: { color: colors.white, fontSize: 11, fontWeight: '700' },
+    stageRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },
+    stageDot: { width: 6, height: 6, borderRadius: 3 },
+    stageText: { color: colors.textFaint, fontSize: 10 },
+  });
+}

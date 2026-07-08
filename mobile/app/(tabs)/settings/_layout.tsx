@@ -1,7 +1,8 @@
 import { Stack } from 'expo-router';
-import { colors } from '../../../lib/theme';
+import { useAppTheme } from '../../../hooks/use-theme';
 
 export default function SettingsLayout() {
+  const { colors } = useAppTheme();
   return (
     <Stack
       screenOptions={{
@@ -16,6 +17,7 @@ export default function SettingsLayout() {
       <Stack.Screen name="profile" options={{ title: 'Your Profile' }} />
       <Stack.Screen name="team" options={{ title: 'Team Members' }} />
       <Stack.Screen name="whatsapp" options={{ title: 'WhatsApp Status' }} />
+      <Stack.Screen name="appearance" options={{ title: 'Appearance' }} />
     </Stack>
   );
 }

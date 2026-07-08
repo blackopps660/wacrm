@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, memo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
 import {
   View,
   Text,
@@ -13,8 +13,9 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../../hooks/use-auth';
+import { useAppTheme } from '../../../hooks/use-theme';
 import { Avatar } from '../../../components/Avatar';
-import { colors, radius, spacing } from '../../../lib/theme';
+import { radius, scaleFontSizes, spacing, type Palette } from '../../../lib/theme';
 import {
   loadTags,
   loadLifecycleStages,
@@ -29,9 +30,11 @@ const SEARCH_DEBOUNCE_MS = 350;
 const ContactRow = memo(function ContactRow({
   item,
   onPress,
+  styles,
 }: {
   item: Contact;
   onPress: (id: string) => void;
+  styles: ReturnType<typeof makeStyles>;
 }) {
   return (
     <Pressable
@@ -66,6 +69,8 @@ const ContactRow = memo(function ContactRow({
 export default function ContactsListScreen() {
   const router = useRouter();
   const { accountId } = useAuth();
+  const { colors, fontScale } = useAppTheme();
+  const styles = useMemo(() => scaleFontSizes(makeStyles(colors), fontScale), [colors, fontScale]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [stages, setStages] = useState<LifecycleStage[]>([]);
@@ -257,7 +262,7 @@ export default function ContactsListScreen() {
           ListFooterComponent={
             loadingMore ? <ActivityIndicator color={colors.accent} style={{ marginVertical: 16 }} /> : null
           }
-          renderItem={({ item }) => <ContactRow item={item} onPress={handlePress} />}
+          renderItem={({ item }) => <ContactRow item={item} onPress={handlePress} styles={styles} />}
         />
       )}
 
@@ -271,73 +276,75 @@ export default function ContactsListScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    margin: spacing.lg,
-    marginBottom: spacing.sm,
-    backgroundColor: colors.surface,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.md,
-  },
-  searchIcon: { marginRight: spacing.sm },
-  searchInput: {
-    flex: 1,
-    paddingVertical: spacing.sm + 2,
-    color: colors.text,
-    fontSize: 15,
-  },
-  filterRow: { paddingBottom: spacing.sm },
-  filterChip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-  },
-  filterChipText: { color: colors.textMuted, fontSize: 12 },
-  filterChipTextActive: { color: colors.white, fontWeight: '600' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
-  emptyText: { color: colors.textFaint },
-  errorBox: { backgroundColor: colors.dangerBg, marginHorizontal: spacing.lg, borderRadius: radius.sm, padding: spacing.sm + 2 },
-  errorText: { color: colors.dangerMuted, fontSize: 12 },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    height: ROW_HEIGHT,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    gap: spacing.md,
-  },
-  rowPressed: { backgroundColor: colors.surface },
-  rowContent: { flex: 1, gap: 2 },
-  name: { color: colors.textSecondary, fontSize: 15, fontWeight: '500' },
-  subtext: { color: colors.textFaint, fontSize: 12 },
-  tagRow: { flexDirection: 'row', gap: 4, marginTop: 3, flexWrap: 'wrap' },
-  tagPill: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: 8 },
-  tagPillText: { color: colors.white, fontSize: 9, fontWeight: '600' },
-  stageDot: { width: 10, height: 10, borderRadius: 5 },
-  fab: {
-    position: 'absolute',
-    right: spacing.lg + 4,
-    bottom: spacing.xl,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
-  },
-  fabPressed: { opacity: 0.9 },
-});
+function makeStyles(colors: Palette) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.bg },
+    searchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      margin: spacing.lg,
+      marginBottom: spacing.sm,
+      backgroundColor: colors.surface,
+      borderRadius: radius.sm,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: spacing.md,
+    },
+    searchIcon: { marginRight: spacing.sm },
+    searchInput: {
+      flex: 1,
+      paddingVertical: spacing.sm + 2,
+      color: colors.text,
+      fontSize: 15,
+    },
+    filterRow: { paddingBottom: spacing.sm },
+    filterChip: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: 6,
+      borderRadius: radius.pill,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+    },
+    filterChipText: { color: colors.textMuted, fontSize: 12 },
+    filterChipTextActive: { color: colors.white, fontWeight: '600' },
+    center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
+    emptyText: { color: colors.textFaint },
+    errorBox: { backgroundColor: colors.dangerBg, marginHorizontal: spacing.lg, borderRadius: radius.sm, padding: spacing.sm + 2 },
+    errorText: { color: colors.dangerMuted, fontSize: 12 },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: spacing.lg,
+      height: ROW_HEIGHT,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+      gap: spacing.md,
+    },
+    rowPressed: { backgroundColor: colors.surface },
+    rowContent: { flex: 1, gap: 2 },
+    name: { color: colors.textSecondary, fontSize: 15, fontWeight: '500' },
+    subtext: { color: colors.textFaint, fontSize: 12 },
+    tagRow: { flexDirection: 'row', gap: 4, marginTop: 3, flexWrap: 'wrap' },
+    tagPill: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: 8 },
+    tagPillText: { color: colors.white, fontSize: 9, fontWeight: '600' },
+    stageDot: { width: 10, height: 10, borderRadius: 5 },
+    fab: {
+      position: 'absolute',
+      right: spacing.lg + 4,
+      bottom: spacing.xl,
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 4,
+    },
+    fabPressed: { opacity: 0.9 },
+  });
+}

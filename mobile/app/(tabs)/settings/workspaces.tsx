@@ -1,14 +1,18 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, FlatList, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../../hooks/use-auth';
+import { useAppTheme } from '../../../hooks/use-theme';
+import { scaleFontSizes, type Palette } from '../../../lib/theme';
 import { loadWorkspaces, switchWorkspace, type Workspace } from '../../../lib/workspaces/queries';
 import { syncPushTokenWithBackend } from '../../../lib/push-notifications';
 
 export default function WorkspacesScreen() {
   const router = useRouter();
   const { user, accountId, refreshProfile } = useAuth();
+  const { colors, fontScale } = useAppTheme();
+  const styles = useMemo(() => scaleFontSizes(makeStyles(colors), fontScale), [colors, fontScale]);
 
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,7 +61,7 @@ export default function WorkspacesScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color="#a78bfa" />
+        <ActivityIndicator color={colors.accent} />
       </View>
     );
   }
@@ -84,7 +88,7 @@ export default function WorkspacesScreen() {
               <Text style={styles.role}>{item.role}</Text>
             </View>
             {switchingId === item.id ? (
-              <ActivityIndicator color="#a78bfa" size="small" />
+              <ActivityIndicator color={colors.accent} size="small" />
             ) : item.isCurrent ? (
               <Text style={styles.checkmark}>✓</Text>
             ) : null}
@@ -95,22 +99,24 @@ export default function WorkspacesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617' },
-  center: { flex: 1, backgroundColor: '#020617', alignItems: 'center', justifyContent: 'center' },
-  errorBox: { backgroundColor: 'rgba(239,68,68,0.1)', margin: 16, borderRadius: 8, padding: 10 },
-  errorText: { color: '#fca5a5', fontSize: 12 },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#0f172a',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#1e293b',
-  },
-  rowActive: { borderColor: '#7c3aed' },
-  name: { color: '#f8fafc', fontSize: 15, fontWeight: '600' },
-  role: { color: '#64748b', fontSize: 12, marginTop: 2, textTransform: 'capitalize' },
-  checkmark: { color: '#a78bfa', fontSize: 18, fontWeight: '700' },
-});
+function makeStyles(colors: Palette) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.bg },
+    center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
+    errorBox: { backgroundColor: colors.dangerBg, margin: 16, borderRadius: 8, padding: 10 },
+    errorText: { color: colors.dangerMuted, fontSize: 12 },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    rowActive: { borderColor: colors.primary },
+    name: { color: colors.text, fontSize: 15, fontWeight: '600' },
+    role: { color: colors.textFaint, fontSize: 12, marginTop: 2, textTransform: 'capitalize' },
+    checkmark: { color: colors.accent, fontSize: 18, fontWeight: '700' },
+  });
+}

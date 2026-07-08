@@ -2,7 +2,8 @@ import { useEffect } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
-import { colors, spacing } from '../lib/theme';
+import { useAppTheme } from '../hooks/use-theme';
+import { spacing } from '../lib/theme';
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
@@ -15,6 +16,7 @@ function formatTime(seconds: number): string {
 export function AudioMessage({ url, tint }: { url: string; tint: 'agent' | 'customer' }) {
   const player = useAudioPlayer(url);
   const status = useAudioPlayerStatus(player);
+  const { colors } = useAppTheme();
 
   // Release the player when this bubble unmounts (e.g. scrolled far
   // enough out of the virtualized list) so playback doesn't keep

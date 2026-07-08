@@ -1,14 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../../hooks/use-auth';
+import { useAppTheme } from '../../../hooks/use-theme';
+import { scaleFontSizes, type Palette } from '../../../lib/theme';
 import { loadTags, loadLifecycleStages } from '../../../lib/contacts/queries';
 import type { Tag, LifecycleStage } from '../../../lib/types';
 
 export default function NewContactScreen() {
   const router = useRouter();
   const { user, accountId } = useAuth();
+  const { colors, fontScale } = useAppTheme();
+  const styles = useMemo(() => scaleFontSizes(makeStyles(colors), fontScale), [colors, fontScale]);
 
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -95,13 +99,13 @@ export default function NewContactScreen() {
       )}
 
       <Text style={styles.label}>Name</Text>
-      <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Full name" placeholderTextColor="#64748b" />
+      <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Full name" placeholderTextColor={colors.textFaint} />
       <Text style={styles.label}>Phone *</Text>
-      <TextInput style={styles.input} value={phone} onChangeText={setPhone} placeholder="+1234567890" placeholderTextColor="#64748b" keyboardType="phone-pad" />
+      <TextInput style={styles.input} value={phone} onChangeText={setPhone} placeholder="+1234567890" placeholderTextColor={colors.textFaint} keyboardType="phone-pad" />
       <Text style={styles.label}>Email</Text>
-      <TextInput style={styles.input} value={email} onChangeText={setEmail} placeholder="you@example.com" placeholderTextColor="#64748b" keyboardType="email-address" autoCapitalize="none" />
+      <TextInput style={styles.input} value={email} onChangeText={setEmail} placeholder="you@example.com" placeholderTextColor={colors.textFaint} keyboardType="email-address" autoCapitalize="none" />
       <Text style={styles.label}>Company</Text>
-      <TextInput style={styles.input} value={company} onChangeText={setCompany} placeholder="Company" placeholderTextColor="#64748b" />
+      <TextInput style={styles.input} value={company} onChangeText={setCompany} placeholder="Company" placeholderTextColor={colors.textFaint} />
 
       <Text style={styles.label}>Lifecycle Stage</Text>
       <View style={styles.chipRow}>
@@ -144,44 +148,46 @@ export default function NewContactScreen() {
         onPress={handleCreate}
         disabled={!phone.trim() || saving}
       >
-        {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.createButtonText}>Create Contact</Text>}
+        {saving ? <ActivityIndicator color={colors.white} size="small" /> : <Text style={styles.createButtonText}>Create Contact</Text>}
       </Pressable>
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617' },
-  content: { padding: 16, paddingBottom: 40, gap: 4 },
-  errorBox: { backgroundColor: 'rgba(239,68,68,0.1)', borderRadius: 8, padding: 10, marginBottom: 8 },
-  errorText: { color: '#fca5a5', fontSize: 12 },
-  label: { color: '#94a3b8', fontSize: 12, marginTop: 12 },
-  input: {
-    backgroundColor: '#1e293b',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: '#f8fafc',
-    marginTop: 4,
-  },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
-  chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 14,
-    backgroundColor: '#1e293b',
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  chipText: { color: '#94a3b8', fontSize: 12 },
-  chipTextActive: { color: '#fff', fontWeight: '600' },
-  emptyText: { color: '#64748b', fontSize: 13 },
-  createButton: {
-    marginTop: 24,
-    backgroundColor: '#7c3aed',
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  createButtonText: { color: '#fff', fontWeight: '600' },
-});
+function makeStyles(colors: Palette) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.bg },
+    content: { padding: 16, paddingBottom: 40, gap: 4 },
+    errorBox: { backgroundColor: colors.dangerBg, borderRadius: 8, padding: 10, marginBottom: 8 },
+    errorText: { color: colors.dangerMuted, fontSize: 12 },
+    label: { color: colors.textMuted, fontSize: 12, marginTop: 12 },
+    input: {
+      backgroundColor: colors.surfaceRaised,
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      color: colors.text,
+      marginTop: 4,
+    },
+    chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+    chip: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 14,
+      backgroundColor: colors.surfaceRaised,
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+    },
+    chipText: { color: colors.textMuted, fontSize: 12 },
+    chipTextActive: { color: colors.white, fontWeight: '600' },
+    emptyText: { color: colors.textFaint, fontSize: 13 },
+    createButton: {
+      marginTop: 24,
+      backgroundColor: colors.primary,
+      borderRadius: 10,
+      paddingVertical: 14,
+      alignItems: 'center',
+    },
+    createButtonText: { color: colors.white, fontWeight: '600' },
+  });
+}

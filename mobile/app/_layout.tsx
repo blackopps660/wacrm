@@ -4,6 +4,7 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as Notifications from 'expo-notifications';
 import { AuthProvider, useAuth } from '../hooks/use-auth';
+import { ThemeProvider, useAppTheme } from '../hooks/use-theme';
 
 function RootNavigator() {
   const { user, loading } = useAuth();
@@ -57,11 +58,18 @@ function RootNavigator() {
   );
 }
 
+function ThemedStatusBar() {
+  const { resolvedScheme } = useAppTheme();
+  return <StatusBar style={resolvedScheme === 'light' ? 'dark' : 'light'} />;
+}
+
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <StatusBar style="auto" />
-      <RootNavigator />
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <ThemedStatusBar />
+        <RootNavigator />
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

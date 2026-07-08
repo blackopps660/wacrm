@@ -1,11 +1,12 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors } from '../../lib/theme';
+import { useAppTheme } from '../../hooks/use-theme';
+import type { Palette } from '../../lib/theme';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
-function TabIcon({ name, focused }: { name: IoniconName; focused: boolean }) {
+function TabIcon({ name, focused, colors }: { name: IoniconName; focused: boolean; colors: Palette }) {
   return (
     <Ionicons
       name={focused ? name : (`${name}-outline` as IoniconName)}
@@ -23,6 +24,7 @@ export default function TabsLayout() {
   // of guessing a fixed padding.
   const insets = useSafeAreaInsets();
   const tabBarHeight = 50 + insets.bottom;
+  const { colors } = useAppTheme();
 
   return (
     <Tabs
@@ -47,7 +49,7 @@ export default function TabsLayout() {
         name="index"
         options={{
           title: 'Dashboard',
-          tabBarIcon: ({ focused }) => <TabIcon name="grid" focused={focused} />,
+          tabBarIcon: ({ focused }) => <TabIcon name="grid" focused={focused} colors={colors} />,
         }}
       />
       <Tabs.Screen
@@ -55,7 +57,7 @@ export default function TabsLayout() {
         options={{
           title: 'Inbox',
           headerShown: false,
-          tabBarIcon: ({ focused }) => <TabIcon name="chatbubble-ellipses" focused={focused} />,
+          tabBarIcon: ({ focused }) => <TabIcon name="chatbubble-ellipses" focused={focused} colors={colors} />,
         }}
       />
       <Tabs.Screen
@@ -63,7 +65,7 @@ export default function TabsLayout() {
         options={{
           title: 'Contacts',
           headerShown: false,
-          tabBarIcon: ({ focused }) => <TabIcon name="people" focused={focused} />,
+          tabBarIcon: ({ focused }) => <TabIcon name="people" focused={focused} colors={colors} />,
         }}
       />
       <Tabs.Screen
@@ -71,7 +73,7 @@ export default function TabsLayout() {
         options={{
           title: 'Settings',
           headerShown: false,
-          tabBarIcon: ({ focused }) => <TabIcon name="settings" focused={focused} />,
+          tabBarIcon: ({ focused }) => <TabIcon name="settings" focused={focused} colors={colors} />,
         }}
       />
     </Tabs>

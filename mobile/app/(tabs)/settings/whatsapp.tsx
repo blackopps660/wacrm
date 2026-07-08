@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, apiFetch, API_BASE_URL } from '../../../lib/supabase';
-import { colors, radius, spacing } from '../../../lib/theme';
+import { useAppTheme } from '../../../hooks/use-theme';
+import { radius, scaleFontSizes, spacing, type Palette } from '../../../lib/theme';
 
 // Status view + "Connect with Meta" launcher — the manual credential
 // form stays web-only (typing a Meta access token on a phone is
@@ -26,6 +27,8 @@ interface ConfigResponse {
 }
 
 export default function WhatsAppStatusScreen() {
+  const { colors, fontScale } = useAppTheme();
+  const styles = useMemo(() => scaleFontSizes(makeStyles(colors), fontScale), [colors, fontScale]);
   const [data, setData] = useState<ConfigResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
@@ -145,41 +148,43 @@ export default function WhatsAppStatusScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg, padding: spacing.lg },
-  center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
-  errorBox: { backgroundColor: colors.dangerBg, borderRadius: radius.sm, padding: spacing.sm + 2, marginBottom: spacing.md },
-  errorText: { color: colors.dangerMuted, fontSize: 12 },
-  statusCard: {
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-  },
-  statusHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  statusCardConnected: { backgroundColor: 'rgba(74,222,128,0.08)', borderColor: 'rgba(74,222,128,0.3)' },
-  statusCardDisconnected: { backgroundColor: colors.dangerBg, borderColor: colors.dangerBorder },
-  statusTitle: { color: colors.text, fontSize: 16, fontWeight: '700' },
-  statusDetail: { color: colors.textSecondary, fontSize: 14, marginTop: spacing.sm },
-  statusDetailMuted: { color: colors.textMuted, fontSize: 12, marginTop: 4 },
-  connectButton: {
-    marginTop: spacing.lg,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.primary,
-    borderRadius: radius.sm,
-    paddingVertical: spacing.md + 2,
-  },
-  connectButtonText: { color: colors.white, fontWeight: '700', fontSize: 15 },
-  note: { color: colors.textFaint, fontSize: 12, marginTop: spacing.lg, lineHeight: 18 },
-  refreshButton: {
-    marginTop: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-    borderRadius: radius.sm,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  refreshButtonText: { color: colors.textSecondary, fontWeight: '600' },
-});
+function makeStyles(colors: Palette) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.bg, padding: spacing.lg },
+    center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
+    errorBox: { backgroundColor: colors.dangerBg, borderRadius: radius.sm, padding: spacing.sm + 2, marginBottom: spacing.md },
+    errorText: { color: colors.dangerMuted, fontSize: 12 },
+    statusCard: {
+      borderRadius: radius.lg,
+      padding: spacing.lg,
+      borderWidth: 1,
+    },
+    statusHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+    statusCardConnected: { backgroundColor: 'rgba(74,222,128,0.08)', borderColor: 'rgba(74,222,128,0.3)' },
+    statusCardDisconnected: { backgroundColor: colors.dangerBg, borderColor: colors.dangerBorder },
+    statusTitle: { color: colors.text, fontSize: 16, fontWeight: '700' },
+    statusDetail: { color: colors.textSecondary, fontSize: 14, marginTop: spacing.sm },
+    statusDetailMuted: { color: colors.textMuted, fontSize: 12, marginTop: 4 },
+    connectButton: {
+      marginTop: spacing.lg,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.sm,
+      backgroundColor: colors.primary,
+      borderRadius: radius.sm,
+      paddingVertical: spacing.md + 2,
+    },
+    connectButtonText: { color: colors.white, fontWeight: '700', fontSize: 15 },
+    note: { color: colors.textFaint, fontSize: 12, marginTop: spacing.lg, lineHeight: 18 },
+    refreshButton: {
+      marginTop: spacing.lg,
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+      borderRadius: radius.sm,
+      paddingVertical: spacing.md,
+      alignItems: 'center',
+    },
+    refreshButtonText: { color: colors.textSecondary, fontWeight: '600' },
+  });
+}

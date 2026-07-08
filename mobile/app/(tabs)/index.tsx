@@ -12,7 +12,9 @@ import {
 import { LineChart, PieChart, BarChart } from 'react-native-gifted-charts';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/use-auth';
+import { useAppTheme } from '../../hooks/use-theme';
 import { formatCurrency } from '../../lib/currency';
+import { scaleFontSizes, type Palette } from '../../lib/theme';
 import {
   loadMetrics,
   loadConversationsSeries,
@@ -47,10 +49,12 @@ function MetricCard({
   label,
   value,
   delta,
+  styles,
 }: {
   label: string;
   value: string;
   delta?: number;
+  styles: ReturnType<typeof makeStyles>;
 }) {
   return (
     <View style={styles.metricCard}>
@@ -73,6 +77,8 @@ function MetricCard({
 
 export default function DashboardScreen() {
   const { defaultCurrency, accountId } = useAuth();
+  const { colors, fontScale } = useAppTheme();
+  const styles = useMemo(() => scaleFontSizes(makeStyles(colors), fontScale), [colors, fontScale]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [rangeDays, setRangeDays] = useState<(typeof RANGE_OPTIONS)[number]>(7);
@@ -167,15 +173,15 @@ export default function DashboardScreen() {
       responseTime?.buckets.map((b) => ({
         value: b.avgMinutes ?? 0,
         label: DOW_SHORT_MON_FIRST[b.dow],
-        frontColor: b.samples > 0 ? '#7c3aed' : '#334155',
+        frontColor: b.samples > 0 ? colors.primary : colors.borderStrong,
       })) ?? [],
-    [responseTime],
+    [responseTime, colors],
   );
 
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color="#a78bfa" />
+        <ActivityIndicator color={colors.accent} />
       </View>
     );
   }
@@ -185,7 +191,7 @@ export default function DashboardScreen() {
       style={styles.container}
       contentContainerStyle={styles.content}
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#a78bfa" />
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
       }
     >
       {error && (
@@ -200,6 +206,7 @@ export default function DashboardScreen() {
           label="Active Conversations"
           value={String(metrics?.activeConversations.current ?? 0)}
           delta={metrics?.activeConversations.previous}
+          styles={styles}
         />
         <MetricCard
           label="New Contacts Today"
@@ -209,10 +216,12 @@ export default function DashboardScreen() {
               ? metrics.newContactsToday.current - metrics.newContactsToday.previous
               : undefined
           }
+          styles={styles}
         />
         <MetricCard
           label="Open Deals Value"
           value={formatCurrency(metrics?.openDealsValue ?? 0, defaultCurrency)}
+          styles={styles}
         />
         <MetricCard
           label="Messages Sent Today"
@@ -222,6 +231,7 @@ export default function DashboardScreen() {
               ? metrics.messagesSentToday.current - metrics.messagesSentToday.previous
               : undefined
           }
+          styles={styles}
         />
       </View>
 
@@ -252,17 +262,17 @@ export default function DashboardScreen() {
           <LineChart
             data={lineData}
             data2={lineData2}
-            color1="#7c3aed"
-            color2="#38bdf8"
+            color1={colors.primary}
+            color2={colors.info}
             thickness={2}
             width={CHART_WIDTH}
             height={160}
             hideDataPoints
             hideRules
-            xAxisColor="#1e293b"
-            yAxisColor="#1e293b"
-            yAxisTextStyle={{ color: '#64748b', fontSize: 10 }}
-            xAxisLabelTextStyle={{ color: '#64748b', fontSize: 9 }}
+            xAxisColor={colors.border}
+            yAxisColor={colors.border}
+            yAxisTextStyle={{ color: colors.textFaint, fontSize: 10 }}
+            xAxisLabelTextStyle={{ color: colors.textFaint, fontSize: 9 }}
             noOfSections={3}
             spacing={rangeDays === 7 ? 40 : rangeDays === 30 ? 10 : 4}
             initialSpacing={10}
@@ -272,11 +282,11 @@ export default function DashboardScreen() {
         )}
         <View style={styles.legendRow}>
           <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#7c3aed' }]} />
+            <View style={[styles.legendDot, { backgroundColor: colors.primary }]} />
             <Text style={styles.legendText}>Incoming</Text>
           </View>
           <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#38bdf8' }]} />
+            <View style={[styles.legendDot, { backgroundColor: colors.info }]} />
             <Text style={styles.legendText}>Outgoing</Text>
           </View>
         </View>
@@ -292,7 +302,7 @@ export default function DashboardScreen() {
               donut
               radius={70}
               innerRadius={45}
-              innerCircleColor="#0f172a"
+              innerCircleColor={colors.surface}
               centerLabelComponent={() => (
                 <Text style={styles.pieCenterText}>
                   {formatCurrency(pipeline?.totalValue ?? 0, defaultCurrency)}
@@ -326,10 +336,10 @@ export default function DashboardScreen() {
             barWidth={20}
             spacing={16}
             hideRules
-            xAxisColor="#1e293b"
-            yAxisColor="#1e293b"
-            yAxisTextStyle={{ color: '#64748b', fontSize: 10 }}
-            xAxisLabelTextStyle={{ color: '#64748b', fontSize: 10 }}
+            xAxisColor={colors.border}
+            yAxisColor={colors.border}
+            yAxisTextStyle={{ color: colors.textFaint, fontSize: 10 }}
+            xAxisLabelTextStyle={{ color: colors.textFaint, fontSize: 10 }}
             noOfSections={3}
           />
         ) : (
@@ -357,76 +367,78 @@ export default function DashboardScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617' },
-  content: { padding: 16, paddingBottom: 40, gap: 16 },
-  center: { flex: 1, backgroundColor: '#020617', alignItems: 'center', justifyContent: 'center' },
-  errorBox: {
-    backgroundColor: 'rgba(239,68,68,0.1)',
-    borderRadius: 8,
-    padding: 10,
-  },
-  errorText: { color: '#fca5a5', fontSize: 12 },
-  metricsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    justifyContent: 'space-between',
-  },
-  metricCard: {
-    width: '47%',
-    backgroundColor: '#0f172a',
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#1e293b',
-  },
-  metricLabel: { color: '#94a3b8', fontSize: 11 },
-  metricValue: { color: '#f8fafc', fontSize: 20, fontWeight: '700', marginTop: 6 },
-  metricDelta: { fontSize: 11, marginTop: 4 },
-  deltaUp: { color: '#4ade80' },
-  deltaDown: { color: '#f87171' },
-  deltaFlat: { color: '#64748b' },
-  card: {
-    backgroundColor: '#0f172a',
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#1e293b',
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  cardTitle: { color: '#f8fafc', fontSize: 14, fontWeight: '600', marginBottom: 8 },
-  rangeRow: { flexDirection: 'row', gap: 6 },
-  rangeChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    backgroundColor: '#1e293b',
-  },
-  rangeChipActive: { backgroundColor: '#7c3aed' },
-  rangeChipText: { color: '#94a3b8', fontSize: 11 },
-  rangeChipTextActive: { color: '#fff', fontWeight: '600' },
-  legendRow: { flexDirection: 'row', gap: 16, marginTop: 10 },
-  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  legendDot: { width: 8, height: 8, borderRadius: 4 },
-  legendText: { color: '#94a3b8', fontSize: 11, flexShrink: 1 },
-  pieRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
-  pieCenterText: { color: '#f8fafc', fontSize: 11, fontWeight: '600' },
-  pieLegend: { flex: 1, gap: 8 },
-  emptyText: { color: '#64748b', fontSize: 13, textAlign: 'center', paddingVertical: 20 },
-  activityRow: {
-    borderTopWidth: 1,
-    borderTopColor: '#1e293b',
-    paddingVertical: 10,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  activityText: { color: '#e2e8f0', fontSize: 13, flex: 1 },
-  activityTime: { color: '#64748b', fontSize: 11 },
-});
+function makeStyles(colors: Palette) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.bg },
+    content: { padding: 16, paddingBottom: 40, gap: 16 },
+    center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
+    errorBox: {
+      backgroundColor: colors.dangerBg,
+      borderRadius: 8,
+      padding: 10,
+    },
+    errorText: { color: colors.dangerMuted, fontSize: 12 },
+    metricsGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 12,
+      justifyContent: 'space-between',
+    },
+    metricCard: {
+      width: '47%',
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    metricLabel: { color: colors.textMuted, fontSize: 11 },
+    metricValue: { color: colors.text, fontSize: 20, fontWeight: '700', marginTop: 6 },
+    metricDelta: { fontSize: 11, marginTop: 4 },
+    deltaUp: { color: colors.success },
+    deltaDown: { color: colors.danger },
+    deltaFlat: { color: colors.textFaint },
+    card: {
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    cardHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 12,
+    },
+    cardTitle: { color: colors.text, fontSize: 14, fontWeight: '600', marginBottom: 8 },
+    rangeRow: { flexDirection: 'row', gap: 6 },
+    rangeChip: {
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 12,
+      backgroundColor: colors.surfaceRaised,
+    },
+    rangeChipActive: { backgroundColor: colors.primary },
+    rangeChipText: { color: colors.textMuted, fontSize: 11 },
+    rangeChipTextActive: { color: colors.white, fontWeight: '600' },
+    legendRow: { flexDirection: 'row', gap: 16, marginTop: 10 },
+    legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    legendDot: { width: 8, height: 8, borderRadius: 4 },
+    legendText: { color: colors.textMuted, fontSize: 11, flexShrink: 1 },
+    pieRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+    pieCenterText: { color: colors.text, fontSize: 11, fontWeight: '600' },
+    pieLegend: { flex: 1, gap: 8 },
+    emptyText: { color: colors.textFaint, fontSize: 13, textAlign: 'center', paddingVertical: 20 },
+    activityRow: {
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      paddingVertical: 10,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    activityText: { color: colors.textSecondary, fontSize: 13, flex: 1 },
+    activityTime: { color: colors.textFaint, fontSize: 11 },
+  });
+}

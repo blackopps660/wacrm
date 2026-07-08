@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, FlatList, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
 import { apiFetch } from '../../../lib/supabase';
 import { useAuth } from '../../../hooks/use-auth';
+import { useAppTheme } from '../../../hooks/use-theme';
+import { scaleFontSizes, type Palette } from '../../../lib/theme';
 import type { AccountRole } from '../../../lib/roles';
 
 // Uses the existing /api/account/members (+ /[userId]) routes, now
@@ -22,6 +24,8 @@ const ROLES: AccountRole[] = ['admin', 'agent', 'viewer'];
 
 export default function TeamScreen() {
   const { user, canManageMembers } = useAuth();
+  const { colors, fontScale } = useAppTheme();
+  const styles = useMemo(() => scaleFontSizes(makeStyles(colors), fontScale), [colors, fontScale]);
   const [members, setMembers] = useState<AccountMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -83,7 +87,7 @@ export default function TeamScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color="#a78bfa" />
+        <ActivityIndicator color={colors.accent} />
       </View>
     );
   }
@@ -114,7 +118,7 @@ export default function TeamScreen() {
                   {item.email && <Text style={styles.email}>{item.email}</Text>}
                 </View>
                 {isBusy ? (
-                  <ActivityIndicator color="#a78bfa" size="small" />
+                  <ActivityIndicator color={colors.accent} size="small" />
                 ) : (
                   <Pressable
                     disabled={!canEdit}
@@ -150,46 +154,48 @@ export default function TeamScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617' },
-  center: { flex: 1, backgroundColor: '#020617', alignItems: 'center', justifyContent: 'center' },
-  errorBox: { backgroundColor: 'rgba(239,68,68,0.1)', margin: 16, borderRadius: 8, padding: 10 },
-  errorText: { color: '#fca5a5', fontSize: 12 },
-  card: {
-    backgroundColor: '#0f172a',
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#1e293b',
-  },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  name: { color: '#f8fafc', fontSize: 15, fontWeight: '600' },
-  email: { color: '#64748b', fontSize: 12, marginTop: 2 },
-  roleBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 12,
-    backgroundColor: '#1e293b',
-  },
-  roleBadgeText: { color: '#a78bfa', fontSize: 12, fontWeight: '600', textTransform: 'capitalize' },
-  roleOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
-  roleOption: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 14,
-    backgroundColor: '#1e293b',
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  roleOptionActive: { backgroundColor: '#7c3aed', borderColor: '#7c3aed' },
-  roleOptionText: { color: '#e2e8f0', fontSize: 12, textTransform: 'capitalize' },
-  removeButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 14,
-    backgroundColor: 'rgba(239,68,68,0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.3)',
-  },
-  removeButtonText: { color: '#fca5a5', fontSize: 12 },
-});
+function makeStyles(colors: Palette) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.bg },
+    center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
+    errorBox: { backgroundColor: colors.dangerBg, margin: 16, borderRadius: 8, padding: 10 },
+    errorText: { color: colors.dangerMuted, fontSize: 12 },
+    card: {
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    name: { color: colors.text, fontSize: 15, fontWeight: '600' },
+    email: { color: colors.textFaint, fontSize: 12, marginTop: 2 },
+    roleBadge: {
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 12,
+      backgroundColor: colors.surfaceRaised,
+    },
+    roleBadgeText: { color: colors.accent, fontSize: 12, fontWeight: '600', textTransform: 'capitalize' },
+    roleOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
+    roleOption: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 14,
+      backgroundColor: colors.surfaceRaised,
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+    },
+    roleOptionActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+    roleOptionText: { color: colors.textSecondary, fontSize: 12, textTransform: 'capitalize' },
+    removeButton: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 14,
+      backgroundColor: colors.dangerBg,
+      borderWidth: 1,
+      borderColor: colors.dangerBorder,
+    },
+    removeButtonText: { color: colors.dangerMuted, fontSize: 12 },
+  });
+}

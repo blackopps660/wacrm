@@ -1,7 +1,8 @@
 import { Stack } from 'expo-router';
-import { colors } from '../../../lib/theme';
+import { useAppTheme } from '../../../hooks/use-theme';
 
 export default function ContactsLayout() {
+  const { colors } = useAppTheme();
   return (
     <Stack
       screenOptions={{

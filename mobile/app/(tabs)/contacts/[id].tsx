@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,8 @@ import {
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../../hooks/use-auth';
+import { useAppTheme } from '../../../hooks/use-theme';
+import { scaleFontSizes, type Palette } from '../../../lib/theme';
 import { loadTags, loadLifecycleStages } from '../../../lib/contacts/queries';
 import type { Contact, Tag, LifecycleStage, ContactNote } from '../../../lib/types';
 
@@ -28,6 +30,8 @@ export default function ContactDetailScreen() {
   const { id: contactId } = useLocalSearchParams<{ id: string }>();
   const navigation = useNavigation();
   const { user, accountId } = useAuth();
+  const { colors, fontScale } = useAppTheme();
+  const styles = useMemo(() => scaleFontSizes(makeStyles(colors), fontScale), [colors, fontScale]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -155,7 +159,7 @@ export default function ContactDetailScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color="#a78bfa" />
+        <ActivityIndicator color={colors.accent} />
       </View>
     );
   }
@@ -171,13 +175,13 @@ export default function ContactDetailScreen() {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Details</Text>
         <Text style={styles.label}>Name</Text>
-        <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Full name" placeholderTextColor="#64748b" />
+        <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Full name" placeholderTextColor={colors.textFaint} />
         <Text style={styles.label}>Phone</Text>
-        <TextInput style={styles.input} value={phone} onChangeText={setPhone} placeholder="+1234567890" placeholderTextColor="#64748b" keyboardType="phone-pad" />
+        <TextInput style={styles.input} value={phone} onChangeText={setPhone} placeholder="+1234567890" placeholderTextColor={colors.textFaint} keyboardType="phone-pad" />
         <Text style={styles.label}>Email</Text>
-        <TextInput style={styles.input} value={email} onChangeText={setEmail} placeholder="you@example.com" placeholderTextColor="#64748b" keyboardType="email-address" autoCapitalize="none" />
+        <TextInput style={styles.input} value={email} onChangeText={setEmail} placeholder="you@example.com" placeholderTextColor={colors.textFaint} keyboardType="email-address" autoCapitalize="none" />
         <Text style={styles.label}>Company</Text>
-        <TextInput style={styles.input} value={company} onChangeText={setCompany} placeholder="Company" placeholderTextColor="#64748b" />
+        <TextInput style={styles.input} value={company} onChangeText={setCompany} placeholder="Company" placeholderTextColor={colors.textFaint} />
 
         <Text style={styles.label}>Lifecycle Stage</Text>
         <View style={styles.chipRow}>
@@ -199,7 +203,7 @@ export default function ContactDetailScreen() {
         </View>
 
         <Pressable style={styles.saveButton} onPress={handleSave} disabled={saving}>
-          {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveButtonText}>Save</Text>}
+          {saving ? <ActivityIndicator color={colors.white} size="small" /> : <Text style={styles.saveButtonText}>Save</Text>}
         </Pressable>
       </View>
 
@@ -230,7 +234,7 @@ export default function ContactDetailScreen() {
             value={newNote}
             onChangeText={setNewNote}
             placeholder="Add a note…"
-            placeholderTextColor="#64748b"
+            placeholderTextColor={colors.textFaint}
             multiline
           />
           <Pressable
@@ -261,66 +265,68 @@ export default function ContactDetailScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617' },
-  content: { padding: 16, paddingBottom: 40, gap: 16 },
-  center: { flex: 1, backgroundColor: '#020617', alignItems: 'center', justifyContent: 'center' },
-  errorBox: { backgroundColor: 'rgba(239,68,68,0.1)', borderRadius: 8, padding: 10 },
-  errorText: { color: '#fca5a5', fontSize: 12 },
-  card: {
-    backgroundColor: '#0f172a',
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#1e293b',
-    gap: 4,
-  },
-  cardTitle: { color: '#f8fafc', fontSize: 14, fontWeight: '600', marginBottom: 6 },
-  label: { color: '#94a3b8', fontSize: 12, marginTop: 8 },
-  input: {
-    backgroundColor: '#1e293b',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    color: '#f8fafc',
-    marginTop: 4,
-  },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
-  chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 14,
-    backgroundColor: '#1e293b',
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  chipText: { color: '#94a3b8', fontSize: 12 },
-  chipTextActive: { color: '#fff', fontWeight: '600' },
-  saveButton: {
-    marginTop: 14,
-    backgroundColor: '#7c3aed',
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  saveButtonText: { color: '#fff', fontWeight: '600' },
-  emptyText: { color: '#64748b', fontSize: 13 },
-  noteInputRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-end', marginBottom: 12 },
-  addNoteButton: {
-    backgroundColor: '#7c3aed',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  noteRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#1e293b',
-    paddingVertical: 10,
-  },
-  noteText: { color: '#e2e8f0', fontSize: 13 },
-  noteTime: { color: '#64748b', fontSize: 11, marginTop: 2 },
-  deleteText: { color: '#f87171', fontSize: 12 },
-});
+function makeStyles(colors: Palette) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.bg },
+    content: { padding: 16, paddingBottom: 40, gap: 16 },
+    center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
+    errorBox: { backgroundColor: colors.dangerBg, borderRadius: 8, padding: 10 },
+    errorText: { color: colors.dangerMuted, fontSize: 12 },
+    card: {
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 4,
+    },
+    cardTitle: { color: colors.text, fontSize: 14, fontWeight: '600', marginBottom: 6 },
+    label: { color: colors.textMuted, fontSize: 12, marginTop: 8 },
+    input: {
+      backgroundColor: colors.surfaceRaised,
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      color: colors.text,
+      marginTop: 4,
+    },
+    chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+    chip: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 14,
+      backgroundColor: colors.surfaceRaised,
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+    },
+    chipText: { color: colors.textMuted, fontSize: 12 },
+    chipTextActive: { color: colors.white, fontWeight: '600' },
+    saveButton: {
+      marginTop: 14,
+      backgroundColor: colors.primary,
+      borderRadius: 10,
+      paddingVertical: 12,
+      alignItems: 'center',
+    },
+    saveButtonText: { color: colors.white, fontWeight: '600' },
+    emptyText: { color: colors.textFaint, fontSize: 13 },
+    noteInputRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-end', marginBottom: 12 },
+    addNoteButton: {
+      backgroundColor: colors.primary,
+      borderRadius: 8,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+    },
+    noteRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      gap: 8,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      paddingVertical: 10,
+    },
+    noteText: { color: colors.textSecondary, fontSize: 13 },
+    noteTime: { color: colors.textFaint, fontSize: 11, marginTop: 2 },
+    deleteText: { color: colors.danger, fontSize: 12 },
+  });
+}

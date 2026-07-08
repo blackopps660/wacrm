@@ -17,9 +17,10 @@ import { useAudioPlayer } from 'expo-audio';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase, apiFetch } from '../../../lib/supabase';
 import { useRealtime } from '../../../hooks/use-realtime';
+import { useAppTheme } from '../../../hooks/use-theme';
 import { loadLifecycleStages } from '../../../lib/contacts/queries';
 import { AudioMessage } from '../../../components/AudioMessage';
-import { colors, radius, spacing } from '../../../lib/theme';
+import { radius, scaleFontSizes, spacing, type Palette } from '../../../lib/theme';
 import type { Message, Contact, LifecycleStage } from '../../../lib/types';
 
 const sendSound = require('../../../assets/sounds/send.wav');
@@ -41,6 +42,8 @@ type ListItem =
   | { kind: 'message'; id: string; message: Message }
   | { kind: 'pending'; id: string; pending: PendingMessage };
 
+type Styles = ReturnType<typeof makeStyles>;
+
 function dateLabel(iso: string): string {
   const date = new Date(iso);
   const today = new Date();
@@ -53,7 +56,7 @@ function dateLabel(iso: string): string {
   return date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
-function MessageContent({ item, isAgent }: { item: Message; isAgent: boolean }) {
+function MessageContent({ item, isAgent, styles }: { item: Message; isAgent: boolean; styles: Styles }) {
   if (item.content_type === 'audio' && item.media_url) {
     return <AudioMessage url={item.media_url} tint={isAgent ? 'agent' : 'customer'} />;
   }
@@ -64,12 +67,20 @@ function MessageContent({ item, isAgent }: { item: Message; isAgent: boolean }) 
   );
 }
 
-const MessageBubble = memo(function MessageBubble({ item }: { item: Message }) {
+const MessageBubble = memo(function MessageBubble({
+  item,
+  colors,
+  styles,
+}: {
+  item: Message;
+  colors: Palette;
+  styles: Styles;
+}) {
   const isAgent = item.sender_type === 'agent' || item.sender_type === 'bot';
   return (
     <View style={[styles.bubbleRow, isAgent ? styles.bubbleRowAgent : styles.bubbleRowCustomer]}>
       <View style={[styles.bubble, isAgent ? styles.bubbleAgent : styles.bubbleCustomer]}>
-        <MessageContent item={item} isAgent={isAgent} />
+        <MessageContent item={item} isAgent={isAgent} styles={styles} />
         <View style={styles.bubbleFooter}>
           <Text style={isAgent ? styles.bubbleTimeAgent : styles.bubbleTimeCustomer}>
             {new Date(item.created_at).toLocaleTimeString(undefined, {
@@ -108,7 +119,15 @@ const MessageBubble = memo(function MessageBubble({ item }: { item: Message }) {
   );
 });
 
-const PendingBubble = memo(function PendingBubble({ pending }: { pending: PendingMessage }) {
+const PendingBubble = memo(function PendingBubble({
+  pending,
+  colors,
+  styles,
+}: {
+  pending: PendingMessage;
+  colors: Palette;
+  styles: Styles;
+}) {
   return (
     <View style={[styles.bubbleRow, styles.bubbleRowAgent]}>
       <View style={[styles.bubble, styles.bubbleAgent, pending.failed && styles.bubbleFailed]}>
@@ -126,7 +145,7 @@ const PendingBubble = memo(function PendingBubble({ pending }: { pending: Pendin
   );
 });
 
-const DateSeparator = memo(function DateSeparator({ label }: { label: string }) {
+const DateSeparator = memo(function DateSeparator({ label, styles }: { label: string; styles: Styles }) {
   return (
     <View style={styles.dateSeparator}>
       <Text style={styles.dateSeparatorText}>{label}</Text>
@@ -138,6 +157,8 @@ export default function MessageThreadScreen() {
   const { id: conversationId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { colors, fontScale } = useAppTheme();
+  const styles = useMemo(() => scaleFontSizes(makeStyles(colors), fontScale), [colors, fontScale]);
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [pending, setPending] = useState<PendingMessage[]>([]);
@@ -427,18 +448,18 @@ export default function MessageThreadScreen() {
         contentContainerStyle={styles.listContent}
         onContentSizeChange={() => !isSearching && listRef.current?.scrollToEnd({ animated: false })}
         renderItem={({ item }) => {
-          if (item.kind === 'date') return <DateSeparator label={item.label} />;
+          if (item.kind === 'date') return <DateSeparator label={item.label} styles={styles} />;
           if (item.kind === 'pending') {
             return (
               <Pressable
                 onPress={() => item.pending.failed && retryPending(item.pending)}
                 disabled={!item.pending.failed}
               >
-                <PendingBubble pending={item.pending} />
+                <PendingBubble pending={item.pending} colors={colors} styles={styles} />
               </Pressable>
             );
           }
-          return <MessageBubble item={item.message} />;
+          return <MessageBubble item={item.message} colors={colors} styles={styles} />;
         }}
         ListEmptyComponent={
           isSearching ? (
@@ -549,176 +570,178 @@ export default function MessageThreadScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  customHeader: {
-    paddingHorizontal: spacing.sm + 2,
-    paddingBottom: spacing.sm,
-    backgroundColor: colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    gap: spacing.sm,
-  },
-  headerTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  backButton: { padding: 4 },
-  headerName: {
-    flex: 1,
-    color: colors.text,
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  stagePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    alignSelf: 'flex-start',
-    backgroundColor: colors.bg,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: 5,
-    marginLeft: spacing.xl + spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-    maxWidth: '70%',
-  },
-  stagePillText: { color: colors.textSecondary, fontSize: 12, fontWeight: '500', flexShrink: 1 },
-  headerActions: { flexDirection: 'row', gap: spacing.sm },
-  headerIconButton: { padding: 4 },
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  searchInput: { flex: 1, color: colors.text, fontSize: 14, paddingVertical: 4 },
-  searchCount: { color: colors.textFaint, fontSize: 12, marginLeft: spacing.sm },
-  blockedBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.dangerBg,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-  },
-  blockedBannerText: { color: colors.dangerMuted, fontSize: 12, flex: 1 },
-  listContent: { padding: spacing.md, gap: 6 },
-  dateSeparator: { alignItems: 'center', marginVertical: spacing.sm },
-  dateSeparatorText: {
-    color: colors.textFaint,
-    fontSize: 11,
-    fontWeight: '600',
-    backgroundColor: colors.surface,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-    overflow: 'hidden',
-  },
-  bubbleRow: { flexDirection: 'row' },
-  bubbleRowAgent: { justifyContent: 'flex-end' },
-  bubbleRowCustomer: { justifyContent: 'flex-start' },
-  bubble: {
-    maxWidth: '80%',
-    borderRadius: radius.md + 2,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 1,
-  },
-  bubbleAgent: {
-    backgroundColor: colors.primary,
-    borderBottomRightRadius: 4,
-  },
-  bubbleFailed: { opacity: 0.6 },
-  bubbleCustomer: {
-    backgroundColor: colors.surface,
-    borderBottomLeftRadius: 4,
-  },
-  bubbleTextAgent: { color: colors.white, fontSize: 15 },
-  bubbleTextCustomer: { color: colors.textSecondary, fontSize: 15 },
-  bubbleFooter: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginTop: 3 },
-  bubbleTimeAgent: { color: 'rgba(255,255,255,0.7)', fontSize: 10 },
-  bubbleTimeCustomer: { color: colors.textFaint, fontSize: 10 },
-  failedText: { color: colors.dangerMuted, fontSize: 11, marginTop: 4 },
-  emptyText: { color: colors.textFaint, fontSize: 13 },
-  errorBar: {
-    backgroundColor: colors.dangerBg,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-  },
-  errorBarText: { color: colors.dangerMuted, fontSize: 12 },
-  composer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    padding: spacing.sm + 2,
-    gap: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  composerInput: {
-    flex: 1,
-    backgroundColor: colors.bg,
-    borderRadius: 20,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm + 2,
-    color: colors.text,
-    fontSize: 15,
-    maxHeight: 100,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  sendButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 20,
-    width: 42,
-    height: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sendButtonPressed: { opacity: 0.85 },
-  sendButtonDisabled: { opacity: 0.5 },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  menuCard: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xl,
-    gap: 4,
-    maxHeight: '70%',
-  },
-  menuTitle: {
-    color: colors.textFaint,
-    fontSize: 12,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    marginBottom: spacing.sm,
-    marginTop: spacing.xs,
-  },
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  menuItemText: { color: colors.textSecondary, fontSize: 15 },
-  stageDot: { width: 8, height: 8, borderRadius: 4 },
-});
+function makeStyles(colors: Palette) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.bg },
+    center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+    customHeader: {
+      paddingHorizontal: spacing.sm + 2,
+      paddingBottom: spacing.sm,
+      backgroundColor: colors.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+      gap: spacing.sm,
+    },
+    headerTopRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+    },
+    backButton: { padding: 4 },
+    headerName: {
+      flex: 1,
+      color: colors.text,
+      fontSize: 17,
+      fontWeight: '700',
+    },
+    stagePill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      alignSelf: 'flex-start',
+      backgroundColor: colors.bg,
+      borderRadius: radius.pill,
+      paddingHorizontal: spacing.sm + 2,
+      paddingVertical: 5,
+      marginLeft: spacing.xl + spacing.sm,
+      borderWidth: 1,
+      borderColor: colors.border,
+      maxWidth: '70%',
+    },
+    stagePillText: { color: colors.textSecondary, fontSize: 12, fontWeight: '500', flexShrink: 1 },
+    headerActions: { flexDirection: 'row', gap: spacing.sm },
+    headerIconButton: { padding: 4 },
+    searchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.surface,
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.sm,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    searchInput: { flex: 1, color: colors.text, fontSize: 14, paddingVertical: 4 },
+    searchCount: { color: colors.textFaint, fontSize: 12, marginLeft: spacing.sm },
+    blockedBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      backgroundColor: colors.dangerBg,
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.sm,
+    },
+    blockedBannerText: { color: colors.dangerMuted, fontSize: 12, flex: 1 },
+    listContent: { padding: spacing.md, gap: 6 },
+    dateSeparator: { alignItems: 'center', marginVertical: spacing.sm },
+    dateSeparatorText: {
+      color: colors.textFaint,
+      fontSize: 11,
+      fontWeight: '600',
+      backgroundColor: colors.surface,
+      paddingHorizontal: spacing.md,
+      paddingVertical: 4,
+      borderRadius: radius.pill,
+      overflow: 'hidden',
+    },
+    bubbleRow: { flexDirection: 'row' },
+    bubbleRowAgent: { justifyContent: 'flex-end' },
+    bubbleRowCustomer: { justifyContent: 'flex-start' },
+    bubble: {
+      maxWidth: '80%',
+      borderRadius: radius.md + 2,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      shadowColor: '#000',
+      shadowOpacity: 0.15,
+      shadowRadius: 3,
+      shadowOffset: { width: 0, height: 1 },
+      elevation: 1,
+    },
+    bubbleAgent: {
+      backgroundColor: colors.primary,
+      borderBottomRightRadius: 4,
+    },
+    bubbleFailed: { opacity: 0.6 },
+    bubbleCustomer: {
+      backgroundColor: colors.surface,
+      borderBottomLeftRadius: 4,
+    },
+    bubbleTextAgent: { color: colors.white, fontSize: 15 },
+    bubbleTextCustomer: { color: colors.textSecondary, fontSize: 15 },
+    bubbleFooter: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginTop: 3 },
+    bubbleTimeAgent: { color: 'rgba(255,255,255,0.7)', fontSize: 10 },
+    bubbleTimeCustomer: { color: colors.textFaint, fontSize: 10 },
+    failedText: { color: colors.dangerMuted, fontSize: 11, marginTop: 4 },
+    emptyText: { color: colors.textFaint, fontSize: 13 },
+    errorBar: {
+      backgroundColor: colors.dangerBg,
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.md,
+    },
+    errorBarText: { color: colors.dangerMuted, fontSize: 12 },
+    composer: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      padding: spacing.sm + 2,
+      gap: spacing.sm,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    composerInput: {
+      flex: 1,
+      backgroundColor: colors.bg,
+      borderRadius: 20,
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.sm + 2,
+      color: colors.text,
+      fontSize: 15,
+      maxHeight: 100,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    sendButton: {
+      backgroundColor: colors.primary,
+      borderRadius: 20,
+      width: 42,
+      height: 42,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    sendButtonPressed: { opacity: 0.85 },
+    sendButtonDisabled: { opacity: 0.5 },
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      justifyContent: 'flex-end',
+    },
+    menuCard: {
+      backgroundColor: colors.surface,
+      borderTopLeftRadius: radius.lg,
+      borderTopRightRadius: radius.lg,
+      paddingVertical: spacing.md,
+      paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.xl,
+      gap: 4,
+      maxHeight: '70%',
+    },
+    menuTitle: {
+      color: colors.textFaint,
+      fontSize: 12,
+      fontWeight: '600',
+      textTransform: 'uppercase',
+      marginBottom: spacing.sm,
+      marginTop: spacing.xs,
+    },
+    menuItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.md,
+      paddingVertical: spacing.md,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    menuItemText: { color: colors.textSecondary, fontSize: 15 },
+    stageDot: { width: 8, height: 8, borderRadius: 4 },
+  });
+}
