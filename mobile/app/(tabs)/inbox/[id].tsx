@@ -10,21 +10,41 @@ import {
   KeyboardAvoidingView,
   Platform,
   Modal,
+  Linking,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useAudioPlayer } from 'expo-audio';
+import { useAudioPlayer, useAudioRecorder, useAudioRecorderState, RecordingPresets, requestRecordingPermissionsAsync } from 'expo-audio';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase, apiFetch } from '../../../lib/supabase';
+import { useAuth } from '../../../hooks/use-auth';
 import { useRealtime } from '../../../hooks/use-realtime';
 import { useAppTheme } from '../../../hooks/use-theme';
 import { loadLifecycleStages } from '../../../lib/contacts/queries';
 import { AudioMessage } from '../../../components/AudioMessage';
+import { AuthedImage } from '../../../components/AuthedImage';
+import {
+  MEDIA_MAX_BYTES_BY_KIND,
+  resolveOpenableUrl,
+  uploadDirectMedia,
+  uploadImageOrVideo,
+  type PickedFile,
+} from '../../../lib/media';
 import { radius, scaleFontSizes, spacing, type Palette } from '../../../lib/theme';
 import type { Message, Contact, LifecycleStage } from '../../../lib/types';
 
 const sendSound = require('../../../assets/sounds/send.wav');
 const receiveSound = require('../../../assets/sounds/receive.wav');
+
+// Keeps each conversation's last-known messages in memory for the
+// lifetime of the JS session (cleared on app restart, same as
+// everything else client-side) — re-opening a chat you already looked
+// at renders instantly from cache instead of waiting on a network
+// round trip, matching WhatsApp's instant-open feel. Refreshed
+// silently in the background every time the screen mounts.
+const messageCache = new Map<string, Message[]>();
 
 // A message still in flight — rendered immediately on send so the UI
 // never waits on the Meta round-trip before showing feedback (matches
@@ -56,9 +76,42 @@ function dateLabel(iso: string): string {
   return date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
-function MessageContent({ item, isAgent, styles }: { item: Message; isAgent: boolean; styles: Styles }) {
+async function openMediaUrl(url: string) {
+  const opened = await resolveOpenableUrl(url);
+  if (opened) Linking.openURL(opened).catch(() => {});
+}
+
+function MessageContent({ item, isAgent, styles, colors }: { item: Message; isAgent: boolean; styles: Styles; colors: Palette }) {
   if (item.content_type === 'audio' && item.media_url) {
     return <AudioMessage url={item.media_url} tint={isAgent ? 'agent' : 'customer'} />;
+  }
+  if (item.content_type === 'image' && item.media_url) {
+    return (
+      <Pressable onPress={() => openMediaUrl(item.media_url!)}>
+        <AuthedImage url={item.media_url} style={styles.mediaImage} />
+      </Pressable>
+    );
+  }
+  if (item.content_type === 'video' && item.media_url) {
+    return (
+      <Pressable style={styles.videoCard} onPress={() => openMediaUrl(item.media_url!)}>
+        <Ionicons name="videocam" size={22} color={isAgent ? colors.bubbleAgentText : colors.textSecondary} />
+        <Text style={isAgent ? styles.bubbleTextAgent : styles.bubbleTextCustomer}>Video — tap to open</Text>
+      </Pressable>
+    );
+  }
+  if (item.content_type === 'document' && item.media_url) {
+    return (
+      <Pressable style={styles.documentCard} onPress={() => openMediaUrl(item.media_url!)}>
+        <Ionicons name="document-text" size={22} color={isAgent ? colors.bubbleAgentText : colors.textSecondary} />
+        <Text
+          style={isAgent ? styles.bubbleTextAgent : styles.bubbleTextCustomer}
+          numberOfLines={1}
+        >
+          {item.content_text || 'Document'}
+        </Text>
+      </Pressable>
+    );
   }
   return (
     <Text style={isAgent ? styles.bubbleTextAgent : styles.bubbleTextCustomer}>
@@ -80,7 +133,7 @@ const MessageBubble = memo(function MessageBubble({
   return (
     <View style={[styles.bubbleRow, isAgent ? styles.bubbleRowAgent : styles.bubbleRowCustomer]}>
       <View style={[styles.bubble, isAgent ? styles.bubbleAgent : styles.bubbleCustomer]}>
-        <MessageContent item={item} isAgent={isAgent} styles={styles} />
+        <MessageContent item={item} isAgent={isAgent} styles={styles} colors={colors} />
         <View style={styles.bubbleFooter}>
           <Text style={isAgent ? styles.bubbleTimeAgent : styles.bubbleTimeCustomer}>
             {new Date(item.created_at).toLocaleTimeString(undefined, {
@@ -105,7 +158,7 @@ const MessageBubble = memo(function MessageBubble({
                   ? colors.dangerMuted
                   : item.status === 'read'
                     ? colors.info
-                    : 'rgba(255,255,255,0.7)'
+                    : colors.bubbleAgentMeta
               }
               style={{ marginLeft: 4 }}
             />
@@ -136,7 +189,7 @@ const PendingBubble = memo(function PendingBubble({
           {pending.failed ? (
             <Ionicons name="alert-circle" size={13} color={colors.dangerMuted} />
           ) : (
-            <Ionicons name="time-outline" size={12} color="rgba(255,255,255,0.6)" />
+            <Ionicons name="time-outline" size={12} color={colors.bubbleAgentMeta} />
           )}
         </View>
         {pending.failed && <Text style={styles.failedText}>Failed to send — tap to retry</Text>}
@@ -154,27 +207,41 @@ const DateSeparator = memo(function DateSeparator({ label, styles }: { label: st
 });
 
 export default function MessageThreadScreen() {
-  const { id: conversationId } = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams<{
+    id: string;
+    name?: string;
+    phone?: string;
+    stageName?: string;
+    stageColor?: string;
+  }>();
+  const conversationId = params.id;
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { accountId } = useAuth();
   const { colors, fontScale } = useAppTheme();
   const styles = useMemo(() => scaleFontSizes(makeStyles(colors), fontScale), [colors, fontScale]);
 
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(() => messageCache.get(conversationId) ?? []);
+  const [messagesReady, setMessagesReady] = useState(() => messageCache.has(conversationId));
   const [pending, setPending] = useState<PendingMessage[]>([]);
   const [contact, setContact] = useState<Contact | null>(null);
   const [stages, setStages] = useState<LifecycleStage[]>([]);
-  const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [stagePickerOpen, setStagePickerOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [mediaViewerOpen, setMediaViewerOpen] = useState(false);
+  const [sharedMedia, setSharedMedia] = useState<Message[] | null>(null);
   const listRef = useRef<FlatList<ListItem>>(null);
 
   const sendPlayer = useAudioPlayer(sendSound);
   const receivePlayer = useAudioPlayer(receiveSound);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorderState = useAudioRecorderState(recorder, 200);
 
   const fetchMessages = useCallback(async () => {
     const { data, error } = await supabase
@@ -186,9 +253,13 @@ export default function MessageThreadScreen() {
 
     if (error) {
       console.error('[Thread] fetch messages error:', error.message);
+      setMessagesReady(true);
       return;
     }
-    setMessages((data as Message[]) ?? []);
+    const rows = (data as Message[]) ?? [];
+    messageCache.set(conversationId, rows);
+    setMessages(rows);
+    setMessagesReady(true);
   }, [conversationId]);
 
   const fetchContact = useCallback(async () => {
@@ -206,31 +277,28 @@ export default function MessageThreadScreen() {
     }
   }, [conversationId]);
 
-  // Load thread + contact, mark read on open.
+  // Fires in parallel, never blocking the initial paint — the header
+  // and composer render instantly (from route params + cache), these
+  // just refresh them in the background.
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      await fetchMessages();
-      if (cancelled) return;
-      setLoading(false);
-      await fetchContact();
-    })();
+    void fetchMessages();
+    void fetchContact();
     loadLifecycleStages(supabase).then(setStages).catch(console.error);
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId]);
+  }, [fetchMessages, fetchContact]);
 
   useRealtime({
     channelName: `mobile-thread-${conversationId}`,
+    messagesFilter: `conversation_id=eq.${conversationId}`,
     onMessageEvent: (event) => {
       const row = event.new as Message;
       if (row.conversation_id !== conversationId) return;
       if (event.eventType === 'INSERT') {
-        setMessages((prev) =>
-          prev.some((m) => m.id === row.id) ? prev : [...prev, row],
-        );
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === row.id)) return prev;
+          const next = [...prev, row];
+          messageCache.set(conversationId, next);
+          return next;
+        });
         if (row.sender_type === 'customer') {
           receivePlayer.seekTo(0);
           receivePlayer.play();
@@ -245,7 +313,11 @@ export default function MessageThreadScreen() {
         }
         setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
       } else if (event.eventType === 'UPDATE') {
-        setMessages((prev) => prev.map((m) => (m.id === row.id ? row : m)));
+        setMessages((prev) => {
+          const next = prev.map((m) => (m.id === row.id ? row : m));
+          messageCache.set(conversationId, next);
+          return next;
+        });
       }
     },
   });
@@ -283,6 +355,35 @@ export default function MessageThreadScreen() {
     }
   }
 
+  async function sendMedia(
+    kind: 'image' | 'video' | 'document' | 'audio',
+    mediaUrl: string,
+    contentText?: string,
+  ) {
+    setSendError(null);
+    try {
+      const res = await apiFetch('/api/whatsapp/send', {
+        method: 'POST',
+        body: JSON.stringify({
+          conversation_id: conversationId,
+          message_type: kind,
+          media_url: mediaUrl,
+          content_text: contentText,
+          filename: kind === 'document' ? contentText : undefined,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setSendError(body.error || 'Failed to send message');
+        return;
+      }
+      sendPlayer.seekTo(0);
+      sendPlayer.play();
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : 'Failed to send message');
+    }
+  }
+
   function handleSend() {
     const trimmed = text.trim();
     if (!trimmed || contact?.blocked_at) return;
@@ -301,6 +402,100 @@ export default function MessageThreadScreen() {
   function retryPending(item: PendingMessage) {
     setPending((prev) => prev.map((p) => (p.tempId === item.tempId ? { ...p, failed: false } : p)));
     void sendText(item.content, item.tempId);
+  }
+
+  async function handlePickImageOrVideo() {
+    setAttachOpen(false);
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      setSendError('Photo library access is required to send media.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images', 'videos'],
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    const kind: 'image' | 'video' = asset.type === 'video' ? 'video' : 'image';
+    const max = MEDIA_MAX_BYTES_BY_KIND[kind];
+    if (asset.fileSize && asset.fileSize > max) {
+      setSendError(`File is too large — ${kind} limit is ${Math.round(max / 1024 / 1024)} MB.`);
+      return;
+    }
+    const file: PickedFile = {
+      uri: asset.uri,
+      name: asset.fileName || `${kind}-${Date.now()}.${kind === 'image' ? 'jpg' : 'mp4'}`,
+      mimeType: asset.mimeType || (kind === 'image' ? 'image/jpeg' : 'video/mp4'),
+      size: asset.fileSize ?? undefined,
+    };
+    setUploading(true);
+    try {
+      const { publicUrl } = await uploadImageOrVideo(file, kind);
+      await sendMedia(kind, publicUrl);
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handlePickDocument() {
+    setAttachOpen(false);
+    if (!accountId) return;
+    const result = await DocumentPicker.getDocumentAsync({ multiple: false, copyToCacheDirectory: true });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    const max = MEDIA_MAX_BYTES_BY_KIND.document;
+    if (asset.size && asset.size > max) {
+      setSendError(`File is too large — document limit is ${Math.round(max / 1024 / 1024)} MB.`);
+      return;
+    }
+    setUploading(true);
+    try {
+      const { publicUrl } = await uploadDirectMedia(
+        { uri: asset.uri, name: asset.name, mimeType: asset.mimeType || 'application/octet-stream', size: asset.size },
+        accountId,
+      );
+      await sendMedia('document', publicUrl, asset.name);
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function startRecording() {
+    const permission = await requestRecordingPermissionsAsync();
+    if (!permission.granted) {
+      setSendError('Microphone access is required to record a voice message.');
+      return;
+    }
+    setSendError(null);
+    await recorder.prepareToRecordAsync();
+    recorder.record();
+  }
+
+  async function cancelRecording() {
+    await recorder.stop().catch(() => {});
+  }
+
+  async function finishRecording() {
+    await recorder.stop();
+    const uri = recorder.uri;
+    if (!uri || !accountId) return;
+    setUploading(true);
+    try {
+      const { publicUrl } = await uploadDirectMedia(
+        { uri, name: `voice-${Date.now()}.m4a`, mimeType: 'audio/mp4' },
+        accountId,
+      );
+      await sendMedia('audio', publicUrl);
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function handleChangeStage(stage: LifecycleStage | null) {
@@ -326,6 +521,20 @@ export default function MessageThreadScreen() {
     if (!error) {
       setContact({ ...contact, blocked_at: blocking ? new Date().toISOString() : null });
     }
+  }
+
+  async function handleOpenSharedMedia() {
+    setMenuOpen(false);
+    setMediaViewerOpen(true);
+    if (sharedMedia !== null) return; // already loaded once this session
+    const { data } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .in('content_type', ['image', 'video', 'document'])
+      .order('created_at', { ascending: false })
+      .limit(60);
+    setSharedMedia((data as Message[]) ?? []);
   }
 
   // Flattens messages + in-flight pending bubbles into one list with
@@ -356,13 +565,14 @@ export default function MessageThreadScreen() {
 
   const isSearching = searchQuery.trim().length > 0;
 
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator color={colors.accent} />
-      </View>
-    );
-  }
+  // Instant header: the real `contact` record (once fetched) always
+  // wins, but until then we render from what the inbox list already
+  // knew (passed via route params) instead of a blank/loading state.
+  const headerName = contact ? contact.name || contact.phone || 'Conversation' : params.name || params.phone || 'Conversation';
+  const headerStageName = contact ? contact.lifecycle_stage?.name ?? null : params.stageName || null;
+  const headerStageColor = contact ? contact.lifecycle_stage?.color ?? colors.borderStrong : params.stageColor || colors.borderStrong;
+  const isRecording = recorderState.isRecording;
+  const recordSeconds = Math.floor((recorderState.durationMillis ?? 0) / 1000);
 
   return (
     // On Android this screen relies purely on the native
@@ -383,7 +593,7 @@ export default function MessageThreadScreen() {
             <Ionicons name="chevron-back" size={24} color={colors.text} />
           </Pressable>
           <Text style={styles.headerName} numberOfLines={1}>
-            {contact?.name || contact?.phone || 'Conversation'}
+            {headerName}
           </Text>
           <View style={styles.headerActions}>
             <Pressable
@@ -402,14 +612,9 @@ export default function MessageThreadScreen() {
           style={styles.stagePill}
           onPress={() => setStagePickerOpen(true)}
         >
-          <View
-            style={[
-              styles.stageDot,
-              { backgroundColor: contact?.lifecycle_stage?.color ?? colors.borderStrong },
-            ]}
-          />
+          <View style={[styles.stageDot, { backgroundColor: headerStageColor }]} />
           <Text style={styles.stagePillText} numberOfLines={1}>
-            {contact?.lifecycle_stage?.name ?? 'Set stage'}
+            {headerStageName ?? 'Set stage'}
           </Text>
           <Ionicons name="chevron-down" size={12} color={colors.textFaint} />
         </Pressable>
@@ -441,37 +646,44 @@ export default function MessageThreadScreen() {
         </View>
       )}
 
-      <FlatList
-        ref={listRef}
-        data={listData}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        onContentSizeChange={() => !isSearching && listRef.current?.scrollToEnd({ animated: false })}
-        renderItem={({ item }) => {
-          if (item.kind === 'date') return <DateSeparator label={item.label} styles={styles} />;
-          if (item.kind === 'pending') {
-            return (
-              <Pressable
-                onPress={() => item.pending.failed && retryPending(item.pending)}
-                disabled={!item.pending.failed}
-              >
-                <PendingBubble pending={item.pending} colors={colors} styles={styles} />
-              </Pressable>
-            );
+      {!messagesReady ? (
+        <View style={[styles.center, styles.messageList]}>
+          <ActivityIndicator color={colors.accent} />
+        </View>
+      ) : (
+        <FlatList
+          ref={listRef}
+          style={styles.messageList}
+          data={listData}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContent}
+          onContentSizeChange={() => !isSearching && listRef.current?.scrollToEnd({ animated: false })}
+          renderItem={({ item }) => {
+            if (item.kind === 'date') return <DateSeparator label={item.label} styles={styles} />;
+            if (item.kind === 'pending') {
+              return (
+                <Pressable
+                  onPress={() => item.pending.failed && retryPending(item.pending)}
+                  disabled={!item.pending.failed}
+                >
+                  <PendingBubble pending={item.pending} colors={colors} styles={styles} />
+                </Pressable>
+              );
+            }
+            return <MessageBubble item={item.message} colors={colors} styles={styles} />;
+          }}
+          ListEmptyComponent={
+            isSearching ? (
+              <View style={styles.center}>
+                <Text style={styles.emptyText}>No messages match &quot;{searchQuery}&quot;</Text>
+              </View>
+            ) : null
           }
-          return <MessageBubble item={item.message} colors={colors} styles={styles} />;
-        }}
-        ListEmptyComponent={
-          isSearching ? (
-            <View style={styles.center}>
-              <Text style={styles.emptyText}>No messages match &quot;{searchQuery}&quot;</Text>
-            </View>
-          ) : null
-        }
-        initialNumToRender={20}
-        maxToRenderPerBatch={20}
-        windowSize={10}
-      />
+          initialNumToRender={20}
+          maxToRenderPerBatch={20}
+          windowSize={10}
+        />
+      )}
 
       {sendError && (
         <View style={styles.errorBar}>
@@ -481,27 +693,76 @@ export default function MessageThreadScreen() {
 
       {!contact?.blocked_at && (
         <View style={styles.composer}>
-          <TextInput
-            style={styles.composerInput}
-            placeholder="Type a message…"
-            placeholderTextColor={colors.textFaint}
-            value={text}
-            onChangeText={setText}
-            multiline
-          />
-          <Pressable
-            style={({ pressed }) => [
-              styles.sendButton,
-              !text.trim() && styles.sendButtonDisabled,
-              pressed && styles.sendButtonPressed,
-            ]}
-            onPress={handleSend}
-            disabled={!text.trim()}
-          >
-            <Ionicons name="send" size={17} color={colors.white} />
-          </Pressable>
+          {isRecording ? (
+            <View style={styles.recordingRow}>
+              <Pressable onPress={cancelRecording} hitSlop={8} style={styles.recordingCancel}>
+                <Ionicons name="trash-outline" size={20} color={colors.dangerMuted} />
+              </Pressable>
+              <View style={styles.recordingIndicator}>
+                <View style={styles.recordingDot} />
+                <Text style={styles.recordingTime}>
+                  {Math.floor(recordSeconds / 60)}:{(recordSeconds % 60).toString().padStart(2, '0')}
+                </Text>
+              </View>
+              <Pressable
+                style={({ pressed }) => [styles.sendButton, pressed && styles.sendButtonPressed]}
+                onPress={finishRecording}
+              >
+                <Ionicons name="send" size={17} color={colors.white} />
+              </Pressable>
+            </View>
+          ) : (
+            <>
+              <Pressable style={styles.attachButton} onPress={() => setAttachOpen(true)} hitSlop={8} disabled={uploading}>
+                {uploading ? (
+                  <ActivityIndicator size="small" color={colors.textFaint} />
+                ) : (
+                  <Ionicons name="add-circle-outline" size={26} color={colors.textFaint} />
+                )}
+              </Pressable>
+              <TextInput
+                style={styles.composerInput}
+                placeholder="Type a message…"
+                placeholderTextColor={colors.textFaint}
+                value={text}
+                onChangeText={setText}
+                multiline
+              />
+              {text.trim() ? (
+                <Pressable
+                  style={({ pressed }) => [styles.sendButton, pressed && styles.sendButtonPressed]}
+                  onPress={handleSend}
+                >
+                  <Ionicons name="send" size={17} color={colors.white} />
+                </Pressable>
+              ) : (
+                <Pressable
+                  style={({ pressed }) => [styles.sendButton, pressed && styles.sendButtonPressed]}
+                  onPress={startRecording}
+                >
+                  <Ionicons name="mic" size={19} color={colors.white} />
+                </Pressable>
+              )}
+            </>
+          )}
         </View>
       )}
+
+      {/* Attachment picker sheet */}
+      <Modal visible={attachOpen} transparent animationType="fade" onRequestClose={() => setAttachOpen(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setAttachOpen(false)}>
+          <View style={styles.menuCard}>
+            <Pressable style={styles.menuItem} onPress={handlePickImageOrVideo}>
+              <Ionicons name="image-outline" size={20} color={colors.textSecondary} />
+              <Text style={styles.menuItemText}>Photo or Video</Text>
+            </Pressable>
+            <Pressable style={styles.menuItem} onPress={handlePickDocument}>
+              <Ionicons name="document-outline" size={20} color={colors.textSecondary} />
+              <Text style={styles.menuItemText}>Document</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
 
       {/* 3-dot action menu */}
       <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
@@ -526,6 +787,10 @@ export default function MessageThreadScreen() {
             >
               <Ionicons name="pricetag-outline" size={20} color={colors.textSecondary} />
               <Text style={styles.menuItemText}>Change Lifecycle Stage</Text>
+            </Pressable>
+            <Pressable style={styles.menuItem} onPress={handleOpenSharedMedia}>
+              <Ionicons name="images-outline" size={20} color={colors.textSecondary} />
+              <Text style={styles.menuItemText}>Media, Links and Docs</Text>
             </Pressable>
             <Pressable style={styles.menuItem} onPress={handleToggleBlock}>
               <Ionicons
@@ -564,6 +829,58 @@ export default function MessageThreadScreen() {
               </Pressable>
             ))}
           </View>
+        </Pressable>
+      </Modal>
+
+      {/* Shared media viewer */}
+      <Modal
+        visible={mediaViewerOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setMediaViewerOpen(false)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setMediaViewerOpen(false)}>
+          <Pressable style={styles.mediaViewerCard} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.mediaViewerHeader}>
+              <Text style={styles.menuTitle}>Media, Links and Docs</Text>
+              <Pressable onPress={() => setMediaViewerOpen(false)} hitSlop={8}>
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
+              </Pressable>
+            </View>
+            {sharedMedia === null ? (
+              <ActivityIndicator color={colors.accent} style={{ marginVertical: spacing.xl }} />
+            ) : sharedMedia.length === 0 ? (
+              <Text style={styles.emptyText}>No shared media yet</Text>
+            ) : (
+              <FlatList
+                data={sharedMedia}
+                keyExtractor={(item) => item.id}
+                numColumns={3}
+                columnWrapperStyle={{ gap: spacing.xs }}
+                contentContainerStyle={{ gap: spacing.xs, paddingBottom: spacing.xl }}
+                renderItem={({ item }) => (
+                  <Pressable style={styles.mediaGridItem} onPress={() => item.media_url && openMediaUrl(item.media_url)}>
+                    {item.content_type === 'image' && item.media_url ? (
+                      <AuthedImage url={item.media_url} style={styles.mediaGridImage} />
+                    ) : (
+                      <View style={styles.mediaGridPlaceholder}>
+                        <Ionicons
+                          name={item.content_type === 'video' ? 'videocam' : 'document-text'}
+                          size={26}
+                          color={colors.textFaint}
+                        />
+                        {item.content_type === 'document' && (
+                          <Text style={styles.mediaGridLabel} numberOfLines={2}>
+                            {item.content_text || 'Document'}
+                          </Text>
+                        )}
+                      </View>
+                    )}
+                  </Pressable>
+                )}
+              />
+            )}
+          </Pressable>
         </Pressable>
       </Modal>
     </KeyboardAvoidingView>
@@ -631,6 +948,7 @@ function makeStyles(colors: Palette) {
       paddingVertical: spacing.sm,
     },
     blockedBannerText: { color: colors.dangerMuted, fontSize: 12, flex: 1 },
+    messageList: { flex: 1, backgroundColor: colors.chatBg },
     listContent: { padding: spacing.md, gap: 6 },
     dateSeparator: { alignItems: 'center', marginVertical: spacing.sm },
     dateSeparatorText: {
@@ -658,21 +976,21 @@ function makeStyles(colors: Palette) {
       elevation: 1,
     },
     bubbleAgent: {
-      backgroundColor: colors.primary,
+      backgroundColor: colors.bubbleAgentBg,
       borderBottomRightRadius: 4,
     },
     bubbleFailed: { opacity: 0.6 },
     bubbleCustomer: {
-      backgroundColor: colors.surface,
+      backgroundColor: colors.bubbleCustomerBg,
       borderBottomLeftRadius: 4,
     },
-    bubbleTextAgent: { color: colors.white, fontSize: 15 },
+    bubbleTextAgent: { color: colors.bubbleAgentText, fontSize: 15 },
     bubbleTextCustomer: { color: colors.textSecondary, fontSize: 15 },
     bubbleFooter: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginTop: 3 },
-    bubbleTimeAgent: { color: 'rgba(255,255,255,0.7)', fontSize: 10 },
+    bubbleTimeAgent: { color: colors.bubbleAgentMeta, fontSize: 10 },
     bubbleTimeCustomer: { color: colors.textFaint, fontSize: 10 },
     failedText: { color: colors.dangerMuted, fontSize: 11, marginTop: 4 },
-    emptyText: { color: colors.textFaint, fontSize: 13 },
+    emptyText: { color: colors.textFaint, fontSize: 13, textAlign: 'center', marginVertical: spacing.lg },
     errorBar: {
       backgroundColor: colors.dangerBg,
       paddingVertical: spacing.sm,
@@ -688,6 +1006,7 @@ function makeStyles(colors: Palette) {
       borderTopColor: colors.border,
       backgroundColor: colors.surface,
     },
+    attachButton: { padding: 4, marginBottom: 4 },
     composerInput: {
       flex: 1,
       backgroundColor: colors.bg,
@@ -710,6 +1029,25 @@ function makeStyles(colors: Palette) {
     },
     sendButtonPressed: { opacity: 0.85 },
     sendButtonDisabled: { opacity: 0.5 },
+    recordingRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+    recordingCancel: { padding: 4 },
+    recordingIndicator: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+    recordingDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.danger },
+    recordingTime: { color: colors.textSecondary, fontSize: 14, fontVariant: ['tabular-nums'] },
+    mediaImage: { width: 220, height: 220, borderRadius: radius.sm },
+    videoCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      minWidth: 160,
+    },
+    documentCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      minWidth: 160,
+      maxWidth: 220,
+    },
     modalBackdrop: {
       flex: 1,
       backgroundColor: 'rgba(0,0,0,0.5)',
@@ -743,5 +1081,36 @@ function makeStyles(colors: Palette) {
     },
     menuItemText: { color: colors.textSecondary, fontSize: 15 },
     stageDot: { width: 8, height: 8, borderRadius: 4 },
+    mediaViewerCard: {
+      backgroundColor: colors.surface,
+      borderTopLeftRadius: radius.lg,
+      borderTopRightRadius: radius.lg,
+      paddingVertical: spacing.md,
+      paddingHorizontal: spacing.lg,
+      paddingBottom: spacing.xl,
+      maxHeight: '75%',
+    },
+    mediaViewerHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: spacing.sm,
+    },
+    mediaGridItem: {
+      flex: 1 / 3,
+      aspectRatio: 1,
+      borderRadius: radius.sm,
+      overflow: 'hidden',
+    },
+    mediaGridImage: { width: '100%', height: '100%' },
+    mediaGridPlaceholder: {
+      flex: 1,
+      backgroundColor: colors.surfaceRaised,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: spacing.xs,
+      gap: 4,
+    },
+    mediaGridLabel: { color: colors.textFaint, fontSize: 10, textAlign: 'center' },
   });
 }

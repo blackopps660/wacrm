@@ -46,7 +46,10 @@ export async function apiFetch(path: string, init: RequestInit = {}) {
 
   const headers = new Headers(init.headers);
   headers.set('Authorization', `Bearer ${session.access_token}`);
-  if (init.body && !headers.has('Content-Type')) {
+  // FormData bodies (media upload) need the multipart boundary that
+  // fetch generates itself — setting Content-Type manually here would
+  // strip it and break the upload.
+  if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
 

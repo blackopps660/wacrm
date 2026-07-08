@@ -1,5 +1,5 @@
 import { NextResponse, after } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClientForRequest } from '@/lib/supabase/server'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { compressImage, compressVideo } from '@/lib/storage/compress-media'
@@ -24,12 +24,25 @@ export async function GET(
       )
     }
 
-    const supabase = await createClient()
+    // Mobile has no cookie jar, and this route is also opened directly
+    // (Linking.openURL for a document tap) where custom headers can't be
+    // attached — so a `?token=` query param is accepted as an
+    // Authorization-header equivalent, same idea as the embedded-signup
+    // deep link. Only used when no header is already present.
+    const tokenParam = new URL(request.url).searchParams.get('token')
+    let effectiveRequest = request
+    if (tokenParam && !request.headers.get('authorization')) {
+      const headers = new Headers(request.headers)
+      headers.set('authorization', `Bearer ${tokenParam}`)
+      effectiveRequest = new Request(request.url, { headers })
+    }
+
+    const { supabase, bearerToken } = await createClientForRequest(effectiveRequest)
 
     const {
       data: { user },
       error: authError,
-    } = await supabase.auth.getUser()
+    } = await supabase.auth.getUser(bearerToken)
 
     if (authError || !user) {
       return NextResponse.json(

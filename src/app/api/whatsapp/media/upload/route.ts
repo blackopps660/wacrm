@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClientForRequest } from '@/lib/supabase/server'
 import { compressImage, compressVideo } from '@/lib/storage/compress-media'
 import { buildMediaPath, MEDIA_MAX_BYTES_BY_KIND } from '@/lib/storage/upload-media'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
@@ -21,12 +21,13 @@ import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit
 // side would only spend CPU to make it worse). Both keep using
 // `uploadAccountMedia`'s direct upload straight from the composer.
 //
-// Auth mirrors every other dashboard-facing route: cookie session,
-// account resolved via `profiles`, Storage write scoped to the
-// account's folder by the same RLS policy `uploadAccountMedia` relies
-// on (migration 023) — this route just does the compress step in
-// between, using the same account-scoped path convention so both
-// upload paths are indistinguishable to everything downstream.
+// Auth accepts either the dashboard's cookie session or a mobile
+// client's Bearer token (createClientForRequest), account resolved via
+// `profiles`, Storage write scoped to the account's folder by the same
+// RLS policy `uploadAccountMedia` relies on (migration 023) — this
+// route just does the compress step in between, using the same
+// account-scoped path convention so both upload paths are
+// indistinguishable to everything downstream.
 // ============================================================
 
 export const CHAT_MEDIA_BUCKET = 'chat-media'
@@ -40,11 +41,11 @@ function isCompressibleKind(value: unknown): value is CompressibleKind {
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createClient()
+    const { supabase, bearerToken } = await createClientForRequest(request)
     const {
       data: { user },
       error: authError,
-    } = await supabase.auth.getUser()
+    } = await supabase.auth.getUser(bearerToken)
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }

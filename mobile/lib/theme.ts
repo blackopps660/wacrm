@@ -6,6 +6,11 @@
 
 export interface Palette {
   bg: string;
+  /** Message-list background specifically — WhatsApp gives the chat
+   * screen its own distinct tone (a wallpaper-like beige in light mode,
+   * a near-black teal in dark mode) rather than reusing the general
+   * app background everywhere. */
+  chatBg: string;
   surface: string;
   surfaceRaised: string;
   border: string;
@@ -25,67 +30,86 @@ export interface Palette {
   dangerBg: string;
   dangerBorder: string;
   white: string;
+  /** Outgoing (agent) chat bubble background/text/meta — WhatsApp's
+   * bubble colors don't track the primary accent color 1:1 (a light
+   * mint bubble in light mode needs dark text, not white). */
+  bubbleAgentBg: string;
+  bubbleAgentText: string;
+  bubbleAgentMeta: string;
+  bubbleCustomerBg: string;
 }
 
 export const darkColors: Palette = {
-  // Backgrounds
-  bg: '#020617',
-  surface: '#0f172a',
-  surfaceRaised: '#141e33',
-  border: '#1e293b',
-  borderStrong: '#334155',
+  // Backgrounds — WhatsApp's dark theme
+  bg: '#111B21',
+  chatBg: '#0B141A',
+  surface: '#1F2C34',
+  surfaceRaised: '#2A3942',
+  border: '#2A3942',
+  borderStrong: '#374045',
 
   // Text
-  text: '#f8fafc',
-  textSecondary: '#e2e8f0',
-  textMuted: '#94a3b8',
-  textFaint: '#64748b',
+  text: '#E9EDEF',
+  textSecondary: '#D1D7DB',
+  textMuted: '#8696A0',
+  textFaint: '#667781',
 
-  // Brand
-  primary: '#7c3aed',
-  primaryMuted: 'rgba(124,58,237,0.15)',
-  accent: '#a78bfa',
+  // Brand — WhatsApp teal-green
+  primary: '#00A884',
+  primaryMuted: 'rgba(0,168,132,0.15)',
+  accent: '#00A884',
 
   // Chart / secondary accent
-  info: '#38bdf8',
+  info: '#53BDEB',
 
   // Status
-  success: '#4ade80',
-  successMuted: '#86efac',
-  danger: '#f87171',
-  dangerMuted: '#fca5a5',
-  dangerBg: 'rgba(239,68,68,0.1)',
-  dangerBorder: 'rgba(239,68,68,0.3)',
+  success: '#00A884',
+  successMuted: '#8696A0',
+  danger: '#F15C6D',
+  dangerMuted: '#F15C6D',
+  dangerBg: 'rgba(241,92,109,0.12)',
+  dangerBorder: 'rgba(241,92,109,0.3)',
 
   white: '#ffffff',
+
+  bubbleAgentBg: '#005C4B',
+  bubbleAgentText: '#E9EDEF',
+  bubbleAgentMeta: 'rgba(233,237,239,0.7)',
+  bubbleCustomerBg: '#202C33',
 } as const;
 
 export const lightColors: Palette = {
-  bg: '#f1f5f9',
+  bg: '#F7F8FA',
+  chatBg: '#ECE5DD',
   surface: '#ffffff',
-  surfaceRaised: '#f8fafc',
-  border: '#e2e8f0',
-  borderStrong: '#cbd5e1',
+  surfaceRaised: '#F0F2F5',
+  border: '#E9EDEF',
+  borderStrong: '#D1D7DB',
 
-  text: '#0f172a',
-  textSecondary: '#1e293b',
-  textMuted: '#475569',
-  textFaint: '#94a3b8',
+  text: '#111B21',
+  textSecondary: '#3B4A54',
+  textMuted: '#667781',
+  textFaint: '#8696A0',
 
-  primary: '#7c3aed',
-  primaryMuted: 'rgba(124,58,237,0.1)',
-  accent: '#7c3aed',
+  primary: '#008069',
+  primaryMuted: 'rgba(0,128,105,0.1)',
+  accent: '#008069',
 
   info: '#0284c7',
 
-  success: '#16a34a',
-  successMuted: '#4ade80',
+  success: '#008069',
+  successMuted: '#25D366',
   danger: '#dc2626',
   dangerMuted: '#ef4444',
   dangerBg: 'rgba(220,38,38,0.08)',
   dangerBorder: 'rgba(220,38,38,0.25)',
 
   white: '#ffffff',
+
+  bubbleAgentBg: '#D9FDD3',
+  bubbleAgentText: '#111B21',
+  bubbleAgentMeta: 'rgba(17,27,33,0.45)',
+  bubbleCustomerBg: '#ffffff',
 };
 
 /** @deprecated Prefer `useAppTheme().colors` — kept for any call site not yet wired to the theme context. */

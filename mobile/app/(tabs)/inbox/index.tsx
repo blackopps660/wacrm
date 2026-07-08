@@ -33,7 +33,7 @@ const ConversationRow = memo(function ConversationRow({
   styles,
 }: {
   item: Conversation;
-  onPress: (id: string) => void;
+  onPress: (item: Conversation) => void;
   styles: ReturnType<typeof makeStyles>;
 }) {
   const isUnread = item.unread_count > 0;
@@ -41,7 +41,7 @@ const ConversationRow = memo(function ConversationRow({
   return (
     <Pressable
       style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-      onPress={() => onPress(item.id)}
+      onPress={() => onPress(item)}
     >
       <Avatar label={label} seed={item.contact?.id} size={48} />
       <View style={styles.rowContent}>
@@ -145,7 +145,22 @@ export default function InboxListScreen() {
   }
 
   const handlePress = useCallback(
-    (id: string) => router.push(`/inbox/${id}`),
+    (item: Conversation) => {
+      // Carries what we already know onto the thread screen so its
+      // header/composer can render on the very first frame instead of
+      // waiting on a network round trip — the actual record is still
+      // re-fetched there to pick up anything stale (e.g. block status).
+      router.push({
+        pathname: '/inbox/[id]',
+        params: {
+          id: item.id,
+          name: item.contact?.name ?? '',
+          phone: item.contact?.phone ?? '',
+          stageName: item.contact?.lifecycle_stage?.name ?? '',
+          stageColor: item.contact?.lifecycle_stage?.color ?? '',
+        },
+      });
+    },
     [router],
   );
 

@@ -18,6 +18,12 @@ interface UseRealtimeOptions {
   channelName: string;
   onMessageEvent?: (event: RealtimeEvent<Message>) => void;
   onConversationEvent?: (event: RealtimeEvent<Conversation>) => void;
+  /** Postgres row filter (e.g. `conversation_id=eq.<id>`) — scopes the
+   * subscription server-side instead of receiving every row in the
+   * table and discarding most of them client-side. Always pass this
+   * when watching a single conversation/thread. */
+  messagesFilter?: string;
+  conversationsFilter?: string;
   enabled?: boolean;
 }
 
@@ -25,6 +31,8 @@ export function useRealtime({
   channelName,
   onMessageEvent,
   onConversationEvent,
+  messagesFilter,
+  conversationsFilter,
   enabled = true,
 }: UseRealtimeOptions) {
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -39,12 +47,24 @@ export function useRealtime({
 
   useEffect(() => {
     if (!enabled) return;
+    // Neither handler passed — nothing to subscribe to.
+    if (!onMessageRef.current && !onConversationRef.current) return;
 
-    const channel = supabase
-      .channel(channelName)
-      .on(
+    let channel = supabase.channel(channelName);
+
+    // Only subscribe to a table when a caller actually handles it —
+    // e.g. the thread screen only cares about `messages`, so it never
+    // needs to receive (and discard) every `conversations` row change
+    // in the account.
+    if (onMessageRef.current) {
+      channel = channel.on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'messages' },
+        {
+          event: '*',
+          schema: 'public',
+          table: 'messages',
+          ...(messagesFilter ? { filter: messagesFilter } : {}),
+        },
         (payload) => {
           onMessageRef.current?.({
             eventType: payload.eventType as RealtimeEvent<Message>['eventType'],
@@ -52,10 +72,18 @@ export function useRealtime({
             old: payload.old as Partial<Message>,
           });
         },
-      )
-      .on(
+      );
+    }
+
+    if (onConversationRef.current) {
+      channel = channel.on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'conversations' },
+        {
+          event: '*',
+          schema: 'public',
+          table: 'conversations',
+          ...(conversationsFilter ? { filter: conversationsFilter } : {}),
+        },
         (payload) => {
           onConversationRef.current?.({
             eventType: payload.eventType as RealtimeEvent<Conversation>['eventType'],
@@ -63,10 +91,12 @@ export function useRealtime({
             old: payload.old as Partial<Conversation>,
           });
         },
-      )
-      .subscribe((status) => {
-        setIsConnected(status === 'SUBSCRIBED');
-      });
+      );
+    }
+
+    channel.subscribe((status) => {
+      setIsConnected(status === 'SUBSCRIBED');
+    });
 
     channelRef.current = channel;
 
@@ -75,7 +105,8 @@ export function useRealtime({
       channelRef.current = null;
       setIsConnected(false);
     };
-  }, [channelName, enabled]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channelName, enabled, messagesFilter, conversationsFilter]);
 
   const unsubscribe = useCallback(() => {
     if (channelRef.current) {

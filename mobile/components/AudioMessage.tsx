@@ -1,9 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { useAppTheme } from '../hooks/use-theme';
 import { spacing } from '../lib/theme';
+import { resolveAuthedSource, type AuthedSource } from '../lib/media';
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
@@ -14,7 +15,23 @@ function formatTime(seconds: number): string {
 
 /** Voice-note style player for `content_type: 'audio'` messages, matching the web app's <audio> playback but as a WhatsApp-style bubble control. */
 export function AudioMessage({ url, tint }: { url: string; tint: 'agent' | 'customer' }) {
-  const player = useAudioPlayer(url);
+  // Inbound audio is served from an auth-gated proxy route
+  // (`/api/whatsapp/media/[mediaId]`) — the web app gets that for free
+  // via cookies, but this native player does a raw HTTP GET with no
+  // cookie jar, so without an explicit Bearer header it 401s silently
+  // and just never loads (the bubble renders but never plays).
+  const [source, setSource] = useState<AuthedSource | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    resolveAuthedSource(url).then((resolved) => {
+      if (!cancelled) setSource(resolved);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+
+  const player = useAudioPlayer(source);
   const status = useAudioPlayerStatus(player);
   const { colors } = useAppTheme();
 
