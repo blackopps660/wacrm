@@ -16,7 +16,7 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { Copy, Loader2, MessageCircle, Sparkles } from 'lucide-react';
+import { Copy, Loader2, Mail, MessageCircle, Sparkles } from 'lucide-react';
 
 import { Button, buttonVariants } from '@/components/ui/button';
 import {
@@ -74,6 +74,9 @@ interface CreatedInvite {
   /** Snapshotted at creation time so a later account rename can't
    *  retroactively change the wa.me message text on the result step. */
   accountName: string;
+  /** Optional — only used to pre-fill the mailto "Send via Email" link.
+   *  Never sent to the server; the invite itself stays link-based. */
+  email: string;
 }
 
 export function InviteMemberDialog({
@@ -85,6 +88,7 @@ export function InviteMemberDialog({
   const [role, setRole] = useState<InviteRole>('agent');
   const [expiry, setExpiry] = useState<string>('7');
   const [label, setLabel] = useState('');
+  const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<CreatedInvite | null>(null);
 
@@ -92,6 +96,7 @@ export function InviteMemberDialog({
     setRole('agent');
     setExpiry('7');
     setLabel('');
+    setEmail('');
     setResult(null);
     setSubmitting(false);
   }
@@ -141,6 +146,7 @@ export function InviteMemberDialog({
         // — the dialog requires admin+ which requires a loaded
         // profile — but stay safe).
         accountName: account?.name ?? 'our wacrm account',
+        email: email.trim(),
       });
       onCreated();
     } catch (err) {
@@ -172,6 +178,20 @@ export function InviteMemberDialog({
     const accountName = result?.accountName ?? 'our wacrm account';
     const message = `Join ${accountName} on wacrm using this link (valid for ${result?.expiresInDays} days): ${url}`;
     return `https://wa.me/?text=${encodeURIComponent(message)}`;
+  }
+
+  // mailto: rather than a server-sent email — there's no transactional
+  // email service wired into this flow (the invite is a self-hosted
+  // link-token, not Supabase's inviteUserByEmail). This opens the
+  // admin's own mail client with the invitee's address and the link
+  // pre-filled, so it lands in the invitee's inbox with zero new
+  // infrastructure or cost.
+  function mailtoShareUrl(url: string): string {
+    const accountName = result?.accountName ?? 'our wacrm account';
+    const subject = `You're invited to join ${accountName} on wacrm`;
+    const body = `Hi,\n\nYou've been invited to join ${accountName} on wacrm. Click the link below to sign up (valid for ${result?.expiresInDays} days):\n\n${url}`;
+    const to = result?.email ? encodeURIComponent(result.email) : '';
+    return `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   }
 
   return (
@@ -243,6 +263,18 @@ export function InviteMemberDialog({
                   ButtonPrimitive — it has no Radix-style asChild slot.
                   Direct anchor preserves right-click "Open in new tab"
                   behaviour too. */}
+              <a
+                href={mailtoShareUrl(result.url)}
+                className={buttonVariants({
+                  variant: 'outline',
+                  className:
+                    'w-full border-border text-muted-foreground hover:bg-muted',
+                })}
+              >
+                <Mail className="size-4" />
+                Send via Email
+              </a>
+
               <a
                 href={whatsappShareUrl(result.url)}
                 target="_blank"
@@ -332,6 +364,25 @@ export function InviteMemberDialog({
                 <p className="text-xs text-muted-foreground">
                   Helps you remember who you sent the link to in the pending
                   list below.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-muted-foreground">
+                  Their email{' '}
+                  <span className="text-xs text-muted-foreground">(optional)</span>
+                </Label>
+                <Input
+                  type="email"
+                  placeholder="teammate@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Only used to pre-fill the &quot;Send via Email&quot; button below —
+                  the invite itself is still just a link, nothing is emailed
+                  automatically.
                 </p>
               </div>
             </div>
