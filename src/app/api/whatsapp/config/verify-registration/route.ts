@@ -140,17 +140,38 @@ export async function GET() {
     )
   }
 
-  const live =
-    checks.phone_metadata_ok &&
-    (checks.waba_subscribed_to_app ?? false) &&
-    checks.locally_marked_registered
+  // Meta's own checks (phone metadata + WABA→app subscription) are
+  // the ground truth for "is this number actually live." The local
+  // `registered_at` timestamp is just wacrm's memory of having called
+  // POST /register successfully — but a number can end up genuinely
+  // live without that ever happening here (e.g. embedded signup skips
+  // /register when no PIN is collected, yet Meta's own signup flow
+  // registers the number on its side regardless). Gating `live` on
+  // the stale local flag produced exactly that bug: real traffic
+  // flowing both ways while this page kept insisting "Not
+  // registered." So `live` is decided by Meta's checks alone, and if
+  // they pass while our local flag is still unset, we self-heal it
+  // here instead of leaving the UI stuck until a full re-save.
+  const live = checks.phone_metadata_ok && (checks.waba_subscribed_to_app ?? false)
+
+  let registeredAt = config.registered_at ?? null
+  if (live && !registeredAt) {
+    const { data: updated } = await supabase
+      .from('whatsapp_config')
+      .update({ registered_at: new Date().toISOString(), last_registration_error: null })
+      .eq('account_id', accountId)
+      .select('registered_at')
+      .maybeSingle()
+    registeredAt = updated?.registered_at ?? registeredAt
+    checks.locally_marked_registered = true
+  }
 
   return NextResponse.json({
     live,
     checks,
     errors,
-    last_registration_error: config.last_registration_error ?? null,
-    registered_at: config.registered_at ?? null,
+    last_registration_error: live ? null : (config.last_registration_error ?? null),
+    registered_at: registeredAt,
     subscribed_apps_at: config.subscribed_apps_at ?? null,
   })
 }
