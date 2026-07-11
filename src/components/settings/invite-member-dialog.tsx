@@ -265,6 +265,16 @@ export function InviteMemberDialog({
                   behaviour too. */}
               <a
                 href={mailtoShareUrl(result.url)}
+                // mailto: links without target="_blank" navigate the
+                // current tab's location to the mailto: URL before the
+                // OS hands off to the mail client — Chrome briefly
+                // shows/unshows the underlying SPA route during that
+                // handoff, which reads as the dialog "blinking" between
+                // two pages. target="_blank" keeps the click from
+                // touching this tab's location at all (mirrors the
+                // WhatsApp anchor below, which already had this).
+                target="_blank"
+                rel="noreferrer noopener"
                 className={buttonVariants({
                   variant: 'outline',
                   className:
