@@ -38,7 +38,7 @@ function SettingsRow({
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { profile, account, accountRole, canManageMembers, signOut } = useAuth();
+  const { profile, account, accountRole, canManageMembers, canEditSettings, signOut } = useAuth();
   const { colors, fontScale } = useAppTheme();
   const styles = useMemo(() => scaleFontSizes(makeStyles(colors), fontScale), [colors, fontScale]);
 
@@ -89,6 +89,15 @@ export default function SettingsScreen() {
           colors={colors}
           styles={styles}
         />
+        {canEditSettings && (
+          <SettingsRow
+            icon="sparkles-outline"
+            value="AI Agents"
+            onPress={() => router.push('/settings/agents')}
+            colors={colors}
+            styles={styles}
+          />
+        )}
         <SettingsRow
           icon="color-palette-outline"
           value="Appearance"
