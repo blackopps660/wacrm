@@ -39,6 +39,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -591,18 +592,20 @@ function AddNodeButton({ onAdd }: { onAdd: (type: NodeType) => void }) {
         {groupNodeTypesByCategory(types).map((group, i) => (
           <div key={group.id}>
             {i > 0 && <DropdownMenuSeparator />}
-            <DropdownMenuLabel className="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
-              {group.label}
-            </DropdownMenuLabel>
-            {group.types.map((t) => {
-              const meta = NODE_META[t];
-              return (
-                <DropdownMenuItem key={t} onClick={() => onAdd(t)}>
-                  <meta.icon className={cn('h-3.5 w-3.5', meta.color)} />
-                  {meta.label}
-                </DropdownMenuItem>
-              );
-            })}
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
+                {group.label}
+              </DropdownMenuLabel>
+              {group.types.map((t) => {
+                const meta = NODE_META[t];
+                return (
+                  <DropdownMenuItem key={t} onClick={() => onAdd(t)}>
+                    <meta.icon className={cn('h-3.5 w-3.5', meta.color)} />
+                    {meta.label}
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuGroup>
           </div>
         ))}
       </DropdownMenuContent>
