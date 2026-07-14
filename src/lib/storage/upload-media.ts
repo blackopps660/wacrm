@@ -14,23 +14,23 @@ import { createClient } from "@/lib/supabase/client";
  * composer call this so the logic lives in exactly one place.
  */
 
-/** 16 MB — matches the `file_size_limit` on both buckets (migrations 016/020/023). */
+/** 16 MB — matches the `file_size_limit` the flow-media bucket keeps (migrations 016/020). */
 export const MEDIA_MAX_BYTES = 16 * 1024 * 1024;
 
 /**
- * Per-kind upload ceilings that mirror Meta's WhatsApp Cloud API caps so
- * a file that the bucket would accept (≤16 MB) but Meta would reject is
- * caught client-side BEFORE upload — otherwise it lands in storage as an
- * orphan and the send fails with a confusing 400. Images are Meta's
- * tightest cap at 5 MB; documents are held at the 16 MB bucket limit
- * (Meta allows 100 MB, but the bucket — and shared-hosting upload UX —
- * caps lower).
+ * Per-kind upload ceilings. Image/video/audio mirror Meta's WhatsApp
+ * Cloud API hard caps EXACTLY — Meta rejects these server-side no
+ * matter what we allow into storage, so raising them here would just
+ * let a too-big upload succeed and then fail confusingly at send time.
+ * Documents are Meta's most generous kind (100 MB allowed); the
+ * chat-media bucket's own ceiling was raised to 30 MB (migration 051)
+ * to give documents real headroom without touching the other three.
  */
 export const MEDIA_MAX_BYTES_BY_KIND = {
   image: 5 * 1024 * 1024,
   video: 16 * 1024 * 1024,
   audio: 16 * 1024 * 1024,
-  document: 16 * 1024 * 1024,
+  document: 30 * 1024 * 1024,
 } as const;
 
 /**

@@ -50,11 +50,16 @@ export async function resolveOpenableUrl(url: string): Promise<string | null> {
 
 export const CHAT_MEDIA_BUCKET = 'chat-media';
 
+// Mirrors src/lib/storage/upload-media.ts's MEDIA_MAX_BYTES_BY_KIND —
+// image/video/audio match Meta's own hard caps (can't be raised;
+// Meta rejects bigger ones server-side regardless of the bucket).
+// Document ceiling matches the chat-media bucket's 30 MB limit
+// (migration 051).
 export const MEDIA_MAX_BYTES_BY_KIND = {
   image: 5 * 1024 * 1024,
   video: 16 * 1024 * 1024,
   audio: 16 * 1024 * 1024,
-  document: 16 * 1024 * 1024,
+  document: 30 * 1024 * 1024,
 } as const;
 
 // Mirrors src/lib/storage/upload-media.ts's buildMediaPath exactly
