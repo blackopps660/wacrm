@@ -12,6 +12,7 @@ import {
   Modal,
   Linking,
   PanResponder,
+  Animated,
 } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -251,26 +252,43 @@ const RECORDING_BAR_COUNT = 34;
  * this one genuinely reflects how loud you're talking in the moment.
  */
 function RecordingWaveform({ metering, colors }: { metering: number | undefined; colors: Palette }) {
-  const [samples, setSamples] = useState<number[]>([]);
+  // One persistent Animated.Value per bar *position* (not per sample) —
+  // each poll animates every position toward its new target instead of
+  // snapping instantly, which is what made this look glitchy on real
+  // devices (34 bars re-rendering with hard height jumps every 100ms).
+  // Lazily created once via the ref-null-check pattern so we don't
+  // allocate 34 Animated.Values on every parent re-render (this
+  // component re-renders on every metering poll while recording).
+  const barsRef = useRef<Animated.Value[] | null>(null);
+  if (!barsRef.current) {
+    barsRef.current = Array.from({ length: RECORDING_BAR_COUNT }, () => new Animated.Value(0.05));
+  }
+  const samplesRef = useRef<number[]>([]);
 
   useEffect(() => {
     if (metering === undefined) return;
     const level = Math.min(1, Math.max(0.05, (metering + 50) / 50));
-    setSamples((prev) => {
-      const next = [...prev, level];
-      return next.length > RECORDING_BAR_COUNT ? next.slice(next.length - RECORDING_BAR_COUNT) : next;
-    });
+    const next = [...samplesRef.current, level];
+    samplesRef.current = next.length > RECORDING_BAR_COUNT ? next.slice(next.length - RECORDING_BAR_COUNT) : next;
+    const padded = Array<number>(RECORDING_BAR_COUNT - samplesRef.current.length)
+      .fill(0.05)
+      .concat(samplesRef.current);
+    Animated.parallel(
+      padded.map((lvl, i) =>
+        Animated.timing(barsRef.current![i], { toValue: lvl, duration: 110, useNativeDriver: false })
+      )
+    ).start();
   }, [metering]);
 
   return (
     <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', height: 28, gap: 2 }}>
-      {samples.map((level, i) => (
-        <View
+      {barsRef.current.map((anim, i) => (
+        <Animated.View
           key={i}
           style={{
             flex: 1,
             minWidth: 2,
-            height: `${8 + level * 92}%`,
+            height: anim.interpolate({ inputRange: [0, 1], outputRange: ['8%', '100%'] }),
             borderRadius: 1,
             backgroundColor: colors.danger,
           }}
@@ -350,6 +368,25 @@ export default function MessageThreadScreen() {
   const recorderState = useAudioRecorderState(recorder, 100);
   const [isLocked, setIsLocked] = useState(false);
   const isLockedRef = useRef(false);
+  // Reflects touch-down immediately, before the async permission-check +
+  // prepareToRecordAsync() + record() chain resolves (that chain can take
+  // 100-300ms on real Android hardware) — without this, the composer
+  // waited for the native recorder to actually confirm it was recording
+  // before showing anything, which is what made the gesture feel
+  // laggy/"weird". Combined with recorderState.isRecording below so the
+  // UI shows instantly on touch and only fully clears once the native
+  // recorder has actually stopped.
+  const [isHolding, setIsHolding] = useState(false);
+  const isHoldingRef = useRef(false);
+  // Guards finishRecording/cancelRecording against reentrancy — e.g. a
+  // fast double-tap on the locked-send button, or the send button and
+  // the trash button firing in quick succession. Without this, two
+  // concurrent calls could both call recorder.stop()/read recorder.uri,
+  // producing a double-send (two outbound messages) or a crash (the
+  // second stop() hitting an already-torn-down native recorder in a way
+  // the short-recording catch wasn't written for).
+  const isFinishingVoiceRef = useRef(false);
+  const [isFinishingVoice, setIsFinishingVoice] = useState(false);
   const isRecordingRef = useRef(false);
   useEffect(() => {
     isRecordingRef.current = recorderState.isRecording;
@@ -613,6 +650,8 @@ export default function MessageThreadScreen() {
     const permission = await requestRecordingPermissionsAsync();
     if (!permission.granted) {
       setSendError('Microphone access is required to record a voice message.');
+      isHoldingRef.current = false;
+      setIsHolding(false);
       return;
     }
     setSendError(null);
@@ -623,41 +662,58 @@ export default function MessageThreadScreen() {
   }
 
   async function cancelRecording() {
+    if (isFinishingVoiceRef.current) return;
+    isFinishingVoiceRef.current = true;
+    isHoldingRef.current = false;
+    setIsHolding(false);
     isLockedRef.current = false;
     setIsLocked(false);
     await recorder.stop().catch(() => {});
+    isFinishingVoiceRef.current = false;
   }
 
   async function finishRecording() {
+    // Blocks a second concurrent call — see isFinishingVoiceRef comment
+    // above. Must be the very first thing this function does.
+    if (isFinishingVoiceRef.current) return;
+    isFinishingVoiceRef.current = true;
+    setIsFinishingVoice(true);
+    isHoldingRef.current = false;
+    setIsHolding(false);
     isLockedRef.current = false;
     setIsLocked(false);
-    // recorder.stop() bridges to Android's MediaRecorder.stop(), which
-    // throws IllegalStateException on a very short/invalid recording
-    // (e.g. a quick tap-and-release). Every other stop() call site in
-    // this file (cancelRecording above, the unmount guard) already
-    // catches it — this one didn't, so that throw became an unhandled
-    // promise rejection in this fire-and-forget async function and took
-    // the whole app down instead of just failing this one recording.
     try {
-      await recorder.stop();
-    } catch (err) {
-      console.error('[finishRecording] stop error:', err);
-      setSendError('Recording was too short to send. Hold the mic a little longer.');
-      return;
-    }
-    const uri = recorder.uri;
-    if (!uri || !accountId) return;
-    setUploading(true);
-    try {
-      const { publicUrl } = await uploadDirectMedia(
-        { uri, name: `voice-${Date.now()}.m4a`, mimeType: 'audio/mp4' },
-        accountId,
-      );
-      await sendMedia('audio', publicUrl);
-    } catch (err) {
-      setSendError(err instanceof Error ? err.message : 'Upload failed');
+      // recorder.stop() bridges to Android's MediaRecorder.stop(), which
+      // throws IllegalStateException on a very short/invalid recording
+      // (e.g. a quick tap-and-release). Every other stop() call site in
+      // this file (cancelRecording above, the unmount guard) already
+      // catches it — this one didn't, so that throw became an unhandled
+      // promise rejection in this fire-and-forget async function and took
+      // the whole app down instead of just failing this one recording.
+      try {
+        await recorder.stop();
+      } catch (err) {
+        console.error('[finishRecording] stop error:', err);
+        setSendError('Recording was too short to send. Hold the mic a little longer.');
+        return;
+      }
+      const uri = recorder.uri;
+      if (!uri || !accountId) return;
+      setUploading(true);
+      try {
+        const { publicUrl } = await uploadDirectMedia(
+          { uri, name: `voice-${Date.now()}.m4a`, mimeType: 'audio/mp4' },
+          accountId,
+        );
+        await sendMedia('audio', publicUrl);
+      } catch (err) {
+        setSendError(err instanceof Error ? err.message : 'Upload failed');
+      } finally {
+        setUploading(false);
+      }
     } finally {
-      setUploading(false);
+      isFinishingVoiceRef.current = false;
+      setIsFinishingVoice(false);
     }
   }
 
@@ -672,6 +728,8 @@ export default function MessageThreadScreen() {
   const micResponder = PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onPanResponderGrant: () => {
+      isHoldingRef.current = true;
+      setIsHolding(true);
       void startRecording();
     },
     onPanResponderMove: (_evt, gestureState) => {
@@ -891,7 +949,10 @@ export default function MessageThreadScreen() {
   const assignedMember = teamMembers?.find((m) => m.user_id === assignedAgentId);
   const assignLabel =
     ownerKind === 'ai' ? 'AI Agent' : assignedAgentId ? (assignedMember?.full_name ?? 'Assigned') : 'Unassigned';
-  const isRecording = recorderState.isRecording;
+  // isHolding flips true synchronously on touch-down; recorderState.isRecording
+  // only flips once the native recorder confirms it — combining them means the
+  // composer responds to touch instantly instead of visibly lagging behind it.
+  const isRecording = isHolding || recorderState.isRecording;
   const recordSeconds = Math.floor((recorderState.durationMillis ?? 0) / 1000);
 
   return (
@@ -1068,7 +1129,12 @@ export default function MessageThreadScreen() {
             // required to send or cancel (same as a locked recording
             // in WhatsApp).
             <View style={styles.recordingRow}>
-              <Pressable onPress={cancelRecording} hitSlop={8} style={styles.recordingCancel}>
+              <Pressable
+                onPress={cancelRecording}
+                hitSlop={8}
+                style={styles.recordingCancel}
+                disabled={isFinishingVoice}
+              >
                 <Ionicons name="trash-outline" size={20} color={colors.dangerMuted} />
               </Pressable>
               <View style={styles.recordingDot} />
@@ -1077,10 +1143,15 @@ export default function MessageThreadScreen() {
               </Text>
               <RecordingWaveform metering={recorderState.metering} colors={colors} />
               <Pressable
-                style={({ pressed }) => [styles.sendButton, pressed && styles.sendButtonPressed]}
+                style={({ pressed }) => [styles.sendButton, (pressed || isFinishingVoice) && styles.sendButtonPressed]}
                 onPress={finishRecording}
+                disabled={isFinishingVoice}
               >
-                <Ionicons name="send" size={17} color={colors.white} />
+                {isFinishingVoice ? (
+                  <ActivityIndicator size="small" color={colors.white} />
+                ) : (
+                  <Ionicons name="send" size={17} color={colors.white} />
+                )}
               </Pressable>
             </View>
           ) : isRecording ? (
