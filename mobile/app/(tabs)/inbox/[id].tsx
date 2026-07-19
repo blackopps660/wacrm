@@ -460,10 +460,30 @@ export default function MessageThreadScreen() {
   // active after navigating away within the same tab. The push
   // notification handler (lib/push-notifications.ts) checks this to
   // skip the banner for a message in the chat you're already viewing.
+  //
+  // That same "tab screens stay mounted" fact is also why the unmount
+  // cleanup above (recorder.stop() on unmount) never fired for the
+  // common case: start recording, switch tabs (or open a different
+  // conversation) without explicitly sending/canceling. This screen
+  // never unmounts, so the native recorder just kept running — showing
+  // as a "stuck" recording bar (still counting up, waveform still
+  // live) whenever any chat was reopened, since it genuinely never
+  // stopped. Canceling on blur (losing focus, not just unmounting)
+  // closes that gap the same way leaving mid-recording via the back
+  // button already worked.
   useFocusEffect(
     useCallback(() => {
       setActiveConversationId(conversationId);
-      return () => setActiveConversationId(null);
+      return () => {
+        setActiveConversationId(null);
+        if (isRecordingRef.current || isHoldingRef.current) {
+          isHoldingRef.current = false;
+          setIsHolding(false);
+          isLockedRef.current = false;
+          setIsLocked(false);
+          recorder.stop().catch(() => {});
+        }
+      };
     }, [conversationId]),
   );
 
