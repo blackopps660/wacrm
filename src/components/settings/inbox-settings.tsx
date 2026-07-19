@@ -248,7 +248,16 @@ export function InboxSettings() {
                 disabled={!canEditSettings || savingReengage}
               >
                 <SelectTrigger className="w-56 bg-muted">
-                  <SelectValue placeholder="Off" />
+                  {/* Select.Value shows the raw stored value by default
+                      (a template UUID here) unless given a render
+                      function to map it to a label. */}
+                  <SelectValue placeholder="Off">
+                    {(value: string) =>
+                      !value || value === "__none__"
+                        ? "Off"
+                        : (templates.find((t) => t.id === value)?.name ?? "Off")
+                    }
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none__">Off</SelectItem>
