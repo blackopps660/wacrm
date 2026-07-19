@@ -164,17 +164,6 @@ export function TemplateManager() {
     [form.header_format, form.header_content],
   );
 
-  // Resize body_samples so it always has exactly bodyVarCount entries.
-  // (We mutate via setForm in an effect so React owns the state.)
-  useEffect(() => {
-    setForm((prev) => {
-      if (prev.body_samples.length === bodyVarCount) return prev;
-      const next = prev.body_samples.slice(0, bodyVarCount);
-      while (next.length < bodyVarCount) next.push('');
-      return { ...prev, body_samples: next };
-    });
-  }, [bodyVarCount]);
-
   useEffect(() => {
     if (authLoading) return;
     if (!user) {
@@ -886,7 +875,16 @@ export function TemplateManager() {
                   <Label className="text-[11px] text-muted-foreground">
                     Sample values (Meta uses these to review your template)
                   </Label>
-                  {form.body_samples.map((val, i) => {
+                  {/* Renders exactly bodyVarCount rows straight off the
+                      variable count rather than mapping form.body_samples
+                      directly — that array was only ever resized by a
+                      separate effect keyed on bodyVarCount, and the two
+                      could desync (e.g. a fast/programmatic body_text
+                      change landing before the effect's next commit),
+                      silently rendering zero rows even with variables
+                      present. Reading/writing by index with a fallback
+                      sidesteps the desync entirely. */}
+                  {Array.from({ length: bodyVarCount }, (_, i) => {
                     const inputId = `template-body-sample-${i}`;
                     return (
                       <Input
@@ -894,10 +892,12 @@ export function TemplateManager() {
                         id={inputId}
                         aria-label={`Sample value for body variable {{${i + 1}}}`}
                         placeholder={`Sample for {{${i + 1}}}`}
-                        value={val}
+                        value={form.body_samples[i] ?? ''}
                         onChange={(e) => {
-                          const next = [...form.body_samples];
-                          next[i] = e.target.value;
+                          const next = Array.from(
+                            { length: bodyVarCount },
+                            (_, j) => (j === i ? e.target.value : (form.body_samples[j] ?? '')),
+                          );
                           setForm({ ...form, body_samples: next });
                         }}
                         className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
