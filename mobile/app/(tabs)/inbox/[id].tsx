@@ -721,13 +721,25 @@ export default function MessageThreadScreen() {
   // gesture. Slide up while holding to "lock" (keeps recording after
   // you lift your finger, showing the same manual send/cancel row a
   // locked recording already had). Slide left before releasing to
-  // cancel outright, same as WhatsApp's cancel gesture. Recreated each
-  // render (cheap) rather than memoized so its closures never go stale
-  // — PanResponder callbacks otherwise capture whichever `accountId`/
-  // `recorder` were current the one time it was created.
+  // cancel outright, same as WhatsApp's cancel gesture.
+  //
+  // A quick, near-stationary tap (release almost immediately, barely
+  // any finger movement) is treated as "tap to record hands-free"
+  // rather than "hold and release to send" — it locks straight into
+  // the recording row instead of attempting to stop+send a near-zero-
+  // length clip (which used to hit the "recording too short" error
+  // path and is what made a plain tap feel broken). A real hold
+  // (finger down for a while, or moved) still sends on release exactly
+  // as before.
+  //
+  // Recreated each render (cheap) rather than memoized so its closures
+  // never go stale — PanResponder callbacks otherwise capture whichever
+  // `accountId`/`recorder` were current the one time it was created.
+  const pressStartRef = useRef(0);
   const micResponder = PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onPanResponderGrant: () => {
+      pressStartRef.current = Date.now();
       isHoldingRef.current = true;
       setIsHolding(true);
       void startRecording();
@@ -742,9 +754,16 @@ export default function MessageThreadScreen() {
       if (isLockedRef.current) return; // stays recording — user taps send/trash explicitly
       if (gestureState.dx < -80) {
         void cancelRecording();
-      } else {
-        void finishRecording();
+        return;
       }
+      const heldMs = Date.now() - pressStartRef.current;
+      const isTap = heldMs < 300 && Math.abs(gestureState.dx) < 10 && Math.abs(gestureState.dy) < 10;
+      if (isTap) {
+        isLockedRef.current = true;
+        setIsLocked(true);
+        return;
+      }
+      void finishRecording();
     },
     onPanResponderTerminate: () => {
       if (!isLockedRef.current) void cancelRecording();
