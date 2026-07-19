@@ -248,15 +248,16 @@ export function InboxSettings() {
                 disabled={!canEditSettings || savingReengage}
               >
                 <SelectTrigger className="w-56 bg-muted">
-                  {/* Select.Value shows the raw stored value by default
-                      (a template UUID here) unless given a render
-                      function to map it to a label. */}
+                  {/* Select.Value renders the raw stored value (a
+                      template UUID here) by default — its function-
+                      children form didn't get invoked in practice
+                      (confirmed live: the DOM showed the bare id
+                      regardless), so the label is computed directly
+                      here instead of relying on that mechanism. */}
                   <SelectValue placeholder="Off">
-                    {(value: string) =>
-                      !value || value === "__none__"
-                        ? "Off"
-                        : (templates.find((t) => t.id === value)?.name ?? "Off")
-                    }
+                    {reengageTemplateId
+                      ? (templates.find((t) => t.id === reengageTemplateId)?.name ?? "Off")
+                      : "Off"}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
