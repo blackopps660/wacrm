@@ -151,6 +151,11 @@ export function MessageComposer({
   // (opus-recorder) so there's no server-side transcode.
   const [recording, setRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
+  // True from the moment "stop" is clicked until the upload + auto-send
+  // finishes — keeps the recording bar's spot occupied with a "Sending…"
+  // state instead of the composer flashing back to idle for the second
+  // or two the upload takes (that gap read as "second click did nothing").
+  const [finalizingVoice, setFinalizingVoice] = useState(false);
   const recorderRef = useRef<import("opus-recorder").default | null>(null);
   const cancelledRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -335,28 +340,39 @@ export function MessageComposer({
   // draft. WhatsApp renders Ogg/Opus as a playable voice note.
   const finalizeRecording = useCallback(
     async (bytes: Uint8Array) => {
-      // Uint8Array is a valid BlobPart at runtime; the cast sidesteps the
-      // lib.dom ArrayBufferLike-vs-ArrayBuffer generic mismatch.
-      const file = new File([bytes as unknown as BlobPart], `voice-${Date.now()}.ogg`, {
-        type: "audio/ogg",
-      });
-      if (file.size === 0) return; // cancelled / empty take
-      if (file.size > MEDIA_MAX_BYTES_BY_KIND.audio) {
-        toast.error("Recording is too long (over 16 MB).");
-        return;
-      }
-      setBusy(true);
       try {
-        const { publicUrl, path } = await uploadAccountMedia(CHAT_MEDIA_BUCKET, file);
-        removeStaged(draftRef.current?.path);
-        setDraft({ kind: "audio", mediaUrl: publicUrl, path, filename: file.name, caption: "" });
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Upload failed.");
+        // Uint8Array is a valid BlobPart at runtime; the cast sidesteps the
+        // lib.dom ArrayBufferLike-vs-ArrayBuffer generic mismatch.
+        const file = new File([bytes as unknown as BlobPart], `voice-${Date.now()}.ogg`, {
+          type: "audio/ogg",
+        });
+        if (file.size === 0) return; // cancelled / empty take
+        if (file.size > MEDIA_MAX_BYTES_BY_KIND.audio) {
+          toast.error("Recording is too long (over 16 MB).");
+          return;
+        }
+        setBusy(true);
+        try {
+          const { publicUrl, path } = await uploadAccountMedia(CHAT_MEDIA_BUCKET, file);
+          // Voice notes skip the draft-preview stage every other media kind
+          // gets — a caption isn't even offered for audio (see sendDraft:
+          // "Audio takes no caption"), so staging it just added a third
+          // click (record → stop → send) that did nothing but confirm what
+          // the user already told the mic button to do by pressing stop.
+          // Sends immediately, matching "click starts it, click sends it."
+          removeStaged(draftRef.current?.path);
+          onSendMedia({ kind: "audio", mediaUrl: publicUrl, path, replyToId: replyTo?.id });
+          onClearReply?.();
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : "Upload failed.");
+        } finally {
+          setBusy(false);
+        }
       } finally {
-        setBusy(false);
+        setFinalizingVoice(false);
       }
     },
-    [removeStaged],
+    [removeStaged, onSendMedia, replyTo?.id, onClearReply],
   );
 
   const startRecording = useCallback(async () => {
@@ -396,6 +412,7 @@ export function MessageComposer({
   const stopRecording = useCallback(() => {
     clearTimer();
     setRecording(false);
+    setFinalizingVoice(true);
     void recorderRef.current?.stop().catch(() => {});
   }, [clearTimer]);
 
@@ -534,10 +551,19 @@ export function MessageComposer({
             size="sm"
             onClick={stopRecording}
             className="h-9 w-9 shrink-0 bg-primary p-0 hover:bg-primary/90"
-            title="Stop and attach"
+            title="Stop and send"
           >
             <Square className="h-4 w-4" />
           </Button>
+        </div>
+      ) : finalizingVoice ? (
+        // Bridges the upload gap between "stop" and the message actually
+        // landing in the thread — without this the composer flashed back
+        // to idle for that second or two, which read as the click doing
+        // nothing.
+        <div className="flex items-center gap-3 rounded-xl border border-border bg-muted px-4 py-2.5">
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+          <span className="flex-1 text-sm text-muted-foreground">Sending voice note…</span>
         </div>
       ) : (
         <div className="flex items-end gap-2">
