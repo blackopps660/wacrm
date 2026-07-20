@@ -34,8 +34,10 @@ const SEARCH_DEBOUNCE_MS = 350;
 const CONVERSATION_SELECT =
   '*, contact:contacts(*, lifecycle_stage:lifecycle_stages(*), contact_tags(tags(*)))';
 
-const STATUS_TABS: { value: 'all' | ConversationStatus; label: string }[] = [
+type StatusTabValue = 'all' | 'unread' | ConversationStatus;
+const STATUS_TABS: { value: StatusTabValue; label: string }[] = [
   { value: 'all', label: 'All' },
+  { value: 'unread', label: 'Unread' },
   { value: 'open', label: 'Open' },
   { value: 'pending', label: 'Pending' },
   { value: 'closed', label: 'Closed' },
@@ -178,7 +180,8 @@ export default function InboxListScreen() {
   const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<'all' | ConversationStatus>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusTabValue>('all');
+  const [archivedCount, setArchivedCount] = useState(0);
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -224,12 +227,28 @@ export default function InboxListScreen() {
     });
   }
 
+  // Server-side status/unread scoping so pagination actually reaches the
+  // matching rows — filtering only ever happened client-side before,
+  // over whatever PAGE_SIZE rows the *unfiltered* most-recent-activity
+  // query happened to return. Closed conversations in particular are
+  // exactly the ones least likely to be recently active, so the Closed
+  // tab would frequently show "no matching conversations" even when
+  // closed conversations existed — this is the "All/Open/Pending/Closed
+  // doesn't work right" bug.
   const fetchConversations = useCallback(async () => {
-    const { data, error } = await supabase
+    let query = supabase
       .from('conversations')
       .select(CONVERSATION_SELECT)
+      .is('archived_at', null)
       .order('last_message_at', { ascending: false })
       .limit(PAGE_SIZE);
+    query =
+      statusFilter === 'unread'
+        ? query.gt('unread_count', 0)
+        : statusFilter !== 'all'
+          ? query.eq('status', statusFilter)
+          : query;
+    const { data, error } = await query;
 
     if (error) {
       console.error('[Inbox] fetch conversations error:', error.message);
@@ -239,18 +258,26 @@ export default function InboxListScreen() {
     cursorRef.current = rows.length > 0 ? (rows[rows.length - 1].last_message_at ?? null) : null;
     setHasMore(rows.length === PAGE_SIZE);
     setConversations(rows);
-  }, []);
+  }, [statusFilter]);
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore || !cursorRef.current) return;
     setLoadingMore(true);
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('conversations')
         .select(CONVERSATION_SELECT)
+        .is('archived_at', null)
         .order('last_message_at', { ascending: false })
         .lt('last_message_at', cursorRef.current)
         .limit(PAGE_SIZE);
+      query =
+        statusFilter === 'unread'
+          ? query.gt('unread_count', 0)
+          : statusFilter !== 'all'
+            ? query.eq('status', statusFilter)
+            : query;
+      const { data, error } = await query;
       if (error) {
         console.error('[Inbox] load more conversations error:', error.message);
         return;
@@ -266,7 +293,23 @@ export default function InboxListScreen() {
     } finally {
       setLoadingMore(false);
     }
-  }, [loadingMore, hasMore]);
+  }, [loadingMore, hasMore, statusFilter]);
+
+  // Archived count — deliberately its own lightweight query rather than
+  // derived from `conversations` (the paginated, status-scoped page
+  // above). An archived conversation is almost always stale (that's why
+  // it got archived), so it routinely falls outside that page after any
+  // refetch — the "Archived" row would show right after archiving
+  // something, then silently vanish on the next pull-to-refresh. A
+  // head:true count is cheap enough to just always be accurate.
+  const fetchArchivedCount = useCallback(async () => {
+    if (!accountId) return;
+    const { count } = await supabase
+      .from('conversations')
+      .select('id', { count: 'exact', head: true })
+      .not('archived_at', 'is', null);
+    setArchivedCount(count ?? 0);
+  }, [accountId]);
 
   // `accountId` dependency so switching workspace (Phase 4) re-fetches
   // under the new account — tab screens stay mounted across
@@ -274,9 +317,10 @@ export default function InboxListScreen() {
   useEffect(() => {
     setLoading(true);
     fetchConversations().finally(() => setLoading(false));
+    fetchArchivedCount();
     loadLifecycleStages(supabase).then(setStages).catch(console.error);
     loadTags(supabase).then(setTags).catch(console.error);
-  }, [fetchConversations, accountId]);
+  }, [fetchConversations, fetchArchivedCount, accountId]);
 
   // Live updates while the list is open. A burst of several messages
   // arriving together (common right after connecting a number) would
@@ -284,8 +328,11 @@ export default function InboxListScreen() {
   // that into a single re-fetch per ~400ms window.
   const scheduleRefetch = useCallback(() => {
     if (refetchTimer.current) clearTimeout(refetchTimer.current);
-    refetchTimer.current = setTimeout(fetchConversations, 400);
-  }, [fetchConversations]);
+    refetchTimer.current = setTimeout(() => {
+      fetchConversations();
+      fetchArchivedCount();
+    }, 400);
+  }, [fetchConversations, fetchArchivedCount]);
 
   useEffect(() => {
     return () => {
@@ -310,7 +357,7 @@ export default function InboxListScreen() {
 
   async function onRefresh() {
     setRefreshing(true);
-    await fetchConversations();
+    await Promise.all([fetchConversations(), fetchArchivedCount()]);
     setRefreshing(false);
   }
 
@@ -351,18 +398,26 @@ export default function InboxListScreen() {
   async function handleToggleArchive(item: Conversation) {
     setActionTarget(null);
     const next = item.archived_at ? null : new Date().toISOString();
-    setConversations((prev) => prev.map((c) => (c.id === item.id ? { ...c, archived_at: next } : c)));
+    // Archiving removes it from this (already server-scoped to
+    // archived_at IS NULL) list outright rather than just flagging it,
+    // since it no longer belongs in the current query's result set.
+    setConversations((prev) => (next ? prev.filter((c) => c.id !== item.id) : prev));
+    setArchivedCount((prev) => Math.max(0, prev + (next ? 1 : -1)));
     await supabase.from('conversations').update({ archived_at: next }).eq('id', item.id);
   }
-
-  const archivedCount = useMemo(() => conversations.filter((c) => c.archived_at).length, [conversations]);
 
   // Client-side — the list is already small (PAGE_SIZE=30, realtime-
   // kept-fresh) so a network round-trip per keystroke would only add
   // latency for no benefit.
   const filtered = useMemo(() => {
-    let rows = conversations.filter((c) => !c.archived_at);
-    if (statusFilter !== 'all') {
+    // Server already scopes `conversations` to the active status/unread
+    // tab and excludes archived rows — this re-applies the same status
+    // check purely so the list updates instantly on tab tap instead of
+    // flashing the previous tab's rows for the moment the refetch takes.
+    let rows = conversations;
+    if (statusFilter === 'unread') {
+      rows = rows.filter((c) => c.unread_count > 0);
+    } else if (statusFilter !== 'all') {
       rows = rows.filter((c) => c.status === statusFilter);
     }
     if (selectedStageId) {
@@ -388,7 +443,35 @@ export default function InboxListScreen() {
     return [...pinned, ...rest];
   }, [conversations, statusFilter, selectedStageId, selectedTagId, search]);
 
-  if (loading) {
+  // How many currently-loaded conversations sit in each stage/tag —
+  // same client-side-over-the-loaded-page approach as the web inbox
+  // sidebar (src/components/inbox/conversation-list.tsx), so a chip
+  // reads "New Lead 49" instead of just "New Lead".
+  const stageCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const c of conversations) {
+      const id = c.contact?.lifecycle_stage_id;
+      if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    return counts;
+  }, [conversations]);
+  const tagCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const c of conversations) {
+      for (const t of c.contact?.tags ?? []) {
+        counts.set(t.id, (counts.get(t.id) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }, [conversations]);
+
+  // Only the very first load (nothing on screen yet) blocks with a
+  // full-screen spinner. Switching status tabs re-triggers `loading`
+  // too (fetchConversations depends on statusFilter), but by then rows
+  // are already on screen — client-filtered instantly above while the
+  // server-scoped refetch runs in the background — so blocking the
+  // whole screen for that would be a regression, not a fix.
+  if (loading && conversations.length === 0) {
     return (
       <View style={styles.center}>
         <ActivityIndicator color={colors.accent} />
@@ -445,6 +528,7 @@ export default function InboxListScreen() {
             contentContainerStyle={{ gap: spacing.sm, paddingHorizontal: spacing.lg }}
             renderItem={({ item }) => {
               const active = selectedStageId === item.id;
+              const count = stageCounts.get(item.id) ?? 0;
               return (
                 <Pressable
                   onPress={() => setSelectedStageId(active ? null : item.id)}
@@ -456,6 +540,11 @@ export default function InboxListScreen() {
                   <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
                     {item.name}
                   </Text>
+                  {count > 0 && (
+                    <Text style={[styles.filterChipCount, active && styles.filterChipTextActive]}>
+                      {count}
+                    </Text>
+                  )}
                 </Pressable>
               );
             }}
@@ -473,6 +562,7 @@ export default function InboxListScreen() {
             contentContainerStyle={{ gap: spacing.sm, paddingHorizontal: spacing.lg }}
             renderItem={({ item }) => {
               const active = selectedTagId === item.id;
+              const count = tagCounts.get(item.id) ?? 0;
               return (
                 <Pressable
                   onPress={() => setSelectedTagId(active ? null : item.id)}
@@ -484,6 +574,11 @@ export default function InboxListScreen() {
                   <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
                     {item.name}
                   </Text>
+                  {count > 0 && (
+                    <Text style={[styles.filterChipCount, active && styles.filterChipTextActive]}>
+                      {count}
+                    </Text>
+                  )}
                 </Pressable>
               );
             }}
@@ -628,6 +723,9 @@ function makeStyles(colors: Palette) {
     closedBadgeText: { color: colors.success, fontSize: 10, fontWeight: '600' },
     filterRow: { paddingBottom: spacing.sm },
     filterChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
       paddingHorizontal: spacing.md,
       paddingVertical: 6,
       borderRadius: radius.pill,
@@ -637,6 +735,7 @@ function makeStyles(colors: Palette) {
     },
     filterChipText: { color: colors.textMuted, fontSize: 12 },
     filterChipTextActive: { color: colors.white, fontWeight: '600' },
+    filterChipCount: { color: colors.textFaint, fontSize: 11, fontWeight: '600' },
     list: { flex: 1 },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
     emptyText: { color: colors.textFaint },

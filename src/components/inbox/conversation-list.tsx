@@ -78,7 +78,7 @@ const FILTER_OPTIONS: { label: string; value: InboxFilter }[] = [
   { label: "Pending", value: "pending" },
 ];
 
-type InboxSection = "active" | "closed";
+type InboxSection = "active" | "closed" | "archived";
 
 // Who owns the conversation, orthogonal to Active/Closed — "Mine" is
 // scoped to the logged-in agent's own assignments, "Unassigned" surfaces
@@ -97,6 +97,20 @@ export function ConversationList({
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<InboxFilter>("all");
   const [section, setSection] = useState<InboxSection>("active");
+  // Closed/Archived get their own dedicated, correctly-scoped fetch
+  // rather than reusing the `conversations` prop (the parent's
+  // top-PAGE_SIZE-by-recent-activity page, merged incrementally via
+  // "Load more"). A closed or archived conversation is, by definition,
+  // usually stale — exactly the kind of row least likely to survive
+  // into that "most recently active" window — so filtering only the
+  // already-loaded page (the old behavior) routinely showed "no
+  // conversations" for these tabs even when matching rows existed.
+  // Scoped locally here rather than touching the parent/realtime
+  // pipeline that the Active section still relies on unchanged.
+  const [sectionRows, setSectionRows] = useState<Conversation[]>([]);
+  const [sectionLoading, setSectionLoading] = useState(false);
+  const [archivedCount, setArchivedCount] = useState(0);
+  const [closedCountAccurate, setClosedCountAccurate] = useState(0);
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>("all");
   const [loading, setLoading] = useState(true);
   // Contact-based filters (issue #272). Tags use OR logic (a conversation
@@ -310,23 +324,85 @@ export function ConversationList({
     return m;
   }, [tags]);
 
-  // Section split happens before anything else — closed conversations are
-  // archived/done, so they never show mixed in with the active section
-  // regardless of the status/unread sub-filter or search/tag filters.
-  const sectioned = useMemo(
-    () =>
-      conversations.filter((c) =>
-        section === "closed" ? c.status === "closed" : c.status !== "closed"
-      ),
-    [conversations, section]
-  );
+  // Closed and Archived read from their own dedicated fetch (sectionRows)
+  // rather than re-filtering the Active section's paginated `conversations`
+  // prop — a closed or archived conversation is by definition usually
+  // stale, exactly the kind of row least likely to survive into that
+  // "most recently active" page, so filtering only the loaded page
+  // routinely showed "no conversations" for these tabs even when
+  // matching rows existed. Active also now excludes archived_at, which
+  // nothing previously did — an archived conversation used to keep
+  // showing in the normal Active list forever.
+  useEffect(() => {
+    if (section === "active") return;
+    let cancelled = false;
+    (async () => {
+      setSectionLoading(true);
+      const supabase = createClient();
+      let query = supabase
+        .from("conversations")
+        .select(CONVERSATION_SELECT)
+        .order(section === "archived" ? "archived_at" : "last_message_at", {
+          ascending: false,
+        })
+        .limit(PAGE_SIZE);
+      query =
+        section === "archived"
+          ? query.not("archived_at", "is", null)
+          : query.eq("status", "closed").is("archived_at", null);
+      const { data, error } = await query;
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to fetch section conversations:", {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code,
+        });
+        setSectionRows([]);
+      } else {
+        setSectionRows(normalizeConversations(data ?? []));
+      }
+      setSectionLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [section]);
+
+  // Tab badge counts — a real count query rather than "however many
+  // happen to be in the loaded page", for the same reason as above.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const supabase = createClient();
+      const [{ count: archived }, { count: closed }] = await Promise.all([
+        supabase
+          .from("conversations")
+          .select("id", { count: "exact", head: true })
+          .not("archived_at", "is", null),
+        supabase
+          .from("conversations")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "closed")
+          .is("archived_at", null),
+      ]);
+      if (cancelled) return;
+      setArchivedCount(archived ?? 0);
+      setClosedCountAccurate(closed ?? 0);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [resyncToken]);
+
+  const sectioned = useMemo(() => {
+    if (section === "closed" || section === "archived") return sectionRows;
+    return conversations.filter((c) => c.status !== "closed" && !c.archived_at);
+  }, [conversations, section, sectionRows]);
 
   const activeCount = useMemo(
-    () => conversations.filter((c) => c.status !== "closed").length,
-    [conversations]
-  );
-  const closedCount = useMemo(
-    () => conversations.filter((c) => c.status === "closed").length,
+    () => conversations.filter((c) => c.status !== "closed" && !c.archived_at).length,
     [conversations]
   );
 
@@ -456,9 +532,25 @@ export function ConversationList({
           )}
         >
           Closed
-          {closedCount > 0 && (
+          {closedCountAccurate > 0 && (
             <span className="ml-1.5 text-xs text-muted-foreground">
-              {closedCount}
+              {closedCountAccurate}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => setSection("archived")}
+          className={cn(
+            "flex-1 border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+            section === "archived"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          )}
+        >
+          Archived
+          {archivedCount > 0 && (
+            <span className="ml-1.5 text-xs text-muted-foreground">
+              {archivedCount}
             </span>
           )}
         </button>
@@ -811,7 +903,7 @@ export function ConversationList({
           parent's overflow-hidden with no scrollbar (issue #229). */}
       <div ref={scrollContainerRef} className="contents">
         <ScrollArea className="min-h-0 flex-1">
-          {loading ? (
+          {loading || (section !== "active" && sectionLoading) ? (
             <div className="flex items-center justify-center py-12">
               <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
             </div>
@@ -824,7 +916,9 @@ export function ConversationList({
                     ? "Nothing unassigned right now"
                     : section === "closed"
                       ? "No closed conversations"
-                      : "No conversations found"}
+                      : section === "archived"
+                        ? "No archived conversations"
+                        : "No conversations found"}
               </p>
             </div>
           ) : (
@@ -845,7 +939,12 @@ export function ConversationList({
               the IntersectionObserver effect above); the button underneath
               is a visible fallback for the brief moment before that fires,
               and while a page is in flight. */}
-          {!loading && hasMore && (
+          {/* This pagination (cursor + IntersectionObserver) is wired to
+              the Active section's parent-fed `conversations` prop only —
+              Closed/Archived load their own single dedicated page above
+              instead, so showing this here would silently page through
+              Active rows while looking at a different section. */}
+          {section === "active" && !loading && hasMore && (
             <div ref={sentinelRef} className="p-3">
               <Button
                 variant="outline"
