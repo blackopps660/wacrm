@@ -182,7 +182,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { phone_number_id, waba_id, access_token, verify_token, pin } = body
+    const { phone_number_id, waba_id, access_token, verify_token, pin, app_id } = body
 
     if (!access_token || !phone_number_id) {
       return NextResponse.json(
@@ -199,6 +199,7 @@ export async function POST(request: Request) {
       accessToken: access_token,
       verifyToken: verify_token,
       pin,
+      appId: app_id,
     })
 
     if (!result.ok) {

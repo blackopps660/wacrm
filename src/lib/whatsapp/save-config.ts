@@ -21,6 +21,12 @@ export interface SaveWhatsappConfigArgs {
   accessToken: string
   verifyToken?: string | null
   pin?: string | null
+  // Optional override for Meta's app-scoped Resumable Upload API
+  // (profile photo, template header images). NULL/omitted falls back
+  // to the server's META_APP_ID env var — only needed when this
+  // account's access token was issued by a different Meta App than
+  // that default (see migration 056).
+  appId?: string | null
 }
 
 export type SaveWhatsappConfigResult =
@@ -47,7 +53,7 @@ export async function saveWhatsappConfig(
   supabaseAdmin: SupabaseClient,
   args: SaveWhatsappConfigArgs,
 ): Promise<SaveWhatsappConfigResult> {
-  const { accountId, userId, phoneNumberId, wabaId, accessToken, verifyToken, pin } = args
+  const { accountId, userId, phoneNumberId, wabaId, accessToken, verifyToken, pin, appId } = args
 
   if (pin !== undefined && pin !== null && pin !== '') {
     if (!/^\d{6}$/.test(pin)) {
@@ -147,6 +153,7 @@ export async function saveWhatsappConfig(
   const baseRow = {
     phone_number_id: phoneNumberId,
     waba_id: wabaId || null,
+    app_id: appId || null,
     access_token: encryptedAccessToken,
     verify_token: encryptedVerifyToken,
     status: registrationError ? 'disconnected' : 'connected',

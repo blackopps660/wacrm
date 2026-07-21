@@ -44,7 +44,7 @@ export async function POST(request: Request) {
 
   const { data: config } = await supabase
     .from('whatsapp_config')
-    .select('phone_number_id, access_token')
+    .select('phone_number_id, access_token, app_id')
     .eq('account_id', accountId)
     .maybeSingle()
   if (!config) {
@@ -54,12 +54,17 @@ export async function POST(request: Request) {
     )
   }
 
-  const appId = process.env.META_APP_ID
+  // The Resumable Upload API is app-scoped — the app_id here must
+  // belong to whichever Meta App issued this account's access token.
+  // Accounts connected via a different app than the server default
+  // (see migration 056) set their own app_id in Settings; everyone
+  // else falls back to the server-wide env var.
+  const appId = config.app_id || process.env.META_APP_ID
   if (!appId) {
     return NextResponse.json(
       {
         error:
-          'META_APP_ID must be set in the environment to upload a profile photo (used for Meta’s Resumable Upload API).',
+          'No Meta App ID configured for this account. Set META_APP_ID in the environment, or enter this account’s Meta App ID in WhatsApp Settings, to upload a profile photo.',
       },
       { status: 500 },
     )

@@ -21,15 +21,20 @@ const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png']
 export async function ensureImageHeaderHandle(
   payload: TemplatePayload,
   accessToken: string,
+  // App-scoped Resumable Upload API — must belong to whichever Meta
+  // App issued `accessToken`. Callers pass the account's own app_id
+  // (see migration 056) when it was connected via a different app
+  // than the server default; falls back to the env var otherwise.
+  appIdOverride?: string | null,
 ): Promise<void> {
   if (payload.header_type !== 'image') return
   if (payload.header_handle) return // already have one
   if (!payload.header_media_url) return // validator already requires url-or-handle
 
-  const appId = process.env.META_APP_ID
+  const appId = appIdOverride || process.env.META_APP_ID
   if (!appId) {
     throw new Error(
-      'Image-header templates need META_APP_ID set (used for Meta’s Resumable Upload). Add it to your environment, or remove the image header.',
+      'Image-header templates need a Meta App ID (used for Meta’s Resumable Upload). Set META_APP_ID in the environment, or enter this account’s Meta App ID in WhatsApp Settings.',
     )
   }
 

@@ -64,6 +64,7 @@ export function WhatsAppConfig() {
 
   const [phoneNumberId, setPhoneNumberId] = useState('');
   const [wabaId, setWabaId] = useState('');
+  const [appId, setAppId] = useState('');
   const [accessToken, setAccessToken] = useState('');
   const [verifyToken, setVerifyToken] = useState('');
   const [pin, setPin] = useState('');
@@ -116,6 +117,7 @@ export function WhatsAppConfig() {
         setConfig(data);
         setPhoneNumberId(data.phone_number_id || '');
         setWabaId(data.waba_id || '');
+        setAppId(data.app_id || '');
         setAccessToken(MASKED_TOKEN);
         setVerifyToken('');
         setPin('');
@@ -124,6 +126,7 @@ export function WhatsAppConfig() {
         setConfig(null);
         setPhoneNumberId('');
         setWabaId('');
+        setAppId('');
         setAccessToken('');
         setVerifyToken('');
         setPin('');
@@ -229,6 +232,7 @@ export function WhatsAppConfig() {
       const payload: Record<string, unknown> = {
         phone_number_id: phoneNumberId.trim(),
         waba_id: wabaId.trim() || null,
+        app_id: appId.trim() || null,
         verify_token: verifyToken.trim() || null,
         // Optional — only sent when the user filled it in. The server
         // requires it on first save or when changing numbers; for a
@@ -379,6 +383,7 @@ export function WhatsAppConfig() {
       setConfig(null);
       setPhoneNumberId('');
       setWabaId('');
+      setAppId('');
       setAccessToken('');
       setVerifyToken('');
       setTokenEdited(false);
@@ -646,6 +651,28 @@ export function WhatsAppConfig() {
                 onChange={(e) => setWabaId(e.target.value)}
                 className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-muted-foreground">
+                Meta App ID
+                <span className="ml-1 text-muted-foreground">(optional)</span>
+              </Label>
+              <Input
+                placeholder="e.g. 1234567890123456"
+                value={appId}
+                onChange={(e) => setAppId(e.target.value)}
+                className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
+              />
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Only needed if this number&apos;s access token came from a{' '}
+                <strong className="text-muted-foreground">different Meta App</strong> than the
+                one this server was originally set up with — e.g. a second business connected
+                with its own app instead of the default. Used for profile photo and template
+                header image uploads. Find it on that app&apos;s dashboard under{' '}
+                <strong className="text-muted-foreground">App settings → Basic → App ID</strong>.
+                Leave blank if unsure.
+              </p>
             </div>
 
             <div className="space-y-2">

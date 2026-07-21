@@ -286,6 +286,12 @@ export interface WhatsAppConfig {
   user_id: string;
   phone_number_id: string;
   waba_id?: string;
+  /**
+   * Overrides META_APP_ID for this account's Resumable Upload calls
+   * (profile photo, template header images) when the access token was
+   * issued by a different Meta App than the server default.
+   */
+  app_id?: string;
   access_token: string;
   verify_token?: string;
   status: 'connected' | 'disconnected';
