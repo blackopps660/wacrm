@@ -36,6 +36,8 @@ import {
   PanelRightClose,
   Bot,
   ArrowRightLeft,
+  Pin,
+  X,
 } from "lucide-react";
 import { format, isToday, isYesterday, differenceInHours } from "date-fns";
 import { Badge } from "@/components/ui/badge";
@@ -1033,6 +1035,74 @@ export function MessageThread({
     void applyAssignment("human", user.id);
   }, [applyAssignment, user?.id]);
 
+  // Pin a message to the top of the thread for a fixed window (24h / 7d /
+  // 30d — see PIN_DURATIONS). Optimistic: stamp pinned_at/pinned_until
+  // locally first so the banner appears instantly, then persist. On the
+  // customer's side nothing happens — WhatsApp exposes no pin primitive,
+  // so this is purely our own inbox view (migration 057).
+  const handlePinMessage = useCallback(
+    async (messageId: string, hours: number) => {
+      if (messageId.startsWith("temp-")) {
+        toast.error("Wait for the message to finish sending");
+        return;
+      }
+      const pinnedAt = new Date().toISOString();
+      const pinnedUntil = new Date(Date.now() + hours * 3_600_000).toISOString();
+      onUpdateMessage(messageId, { pinned_at: pinnedAt, pinned_until: pinnedUntil });
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("messages")
+        .update({ pinned_at: pinnedAt, pinned_until: pinnedUntil })
+        .eq("id", messageId);
+      if (error) {
+        console.error("Failed to pin message:", error);
+        toast.error("Failed to pin");
+        onUpdateMessage(messageId, { pinned_at: null, pinned_until: null });
+        return;
+      }
+      toast.success("Message pinned");
+    },
+    [onUpdateMessage],
+  );
+
+  const handleUnpinMessage = useCallback(
+    async (messageId: string) => {
+      onUpdateMessage(messageId, { pinned_at: null, pinned_until: null });
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("messages")
+        .update({ pinned_at: null, pinned_until: null })
+        .eq("id", messageId);
+      if (error) {
+        console.error("Failed to unpin message:", error);
+        toast.error("Failed to unpin");
+      }
+    },
+    [onUpdateMessage],
+  );
+
+  // Active pins = pinned and not yet expired. Newest pin wins the banner
+  // slot; expiry is a pure read-time comparison so no sweeper is needed.
+  const activePins = useMemo(() => {
+    const t = Date.now();
+    return messages
+      .filter((m) => m.pinned_until && new Date(m.pinned_until).getTime() > t)
+      .sort(
+        (a, b) =>
+          new Date(b.pinned_at ?? 0).getTime() -
+          new Date(a.pinned_at ?? 0).getTime(),
+      );
+  }, [messages]);
+  const topPin = activePins[0] ?? null;
+
+  const scrollToMessage = useCallback((messageId: string) => {
+    const el =
+      typeof document !== "undefined"
+        ? document.getElementById(`msg-${messageId}`)
+        : null;
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, []);
+
   // Empty state — same WhatsApp-style doodle background as the active
   // thread below, so swapping between empty/selected doesn't change the
   // pattern under the user's eye.
@@ -1296,6 +1366,48 @@ export function MessageThread({
         </div>
       </div>
 
+      {/* Pinned-message banner — WhatsApp-style bar under the header
+          showing the newest active pin. Click scrolls to the message;
+          the × unpins. Auto-hides once the pin expires (activePins is a
+          read-time filter, so no timer needed). */}
+      {topPin && (
+        <button
+          type="button"
+          onClick={() => scrollToMessage(topPin.id)}
+          className="flex w-full items-center gap-2 border-b border-border bg-card/95 px-4 py-2 text-left backdrop-blur-sm hover:bg-muted/60"
+        >
+          <Pin className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-primary">
+              Pinned message
+              {activePins.length > 1 ? ` · ${activePins.length}` : ""}
+            </p>
+            <p className="truncate text-xs text-muted-foreground">
+              {topPin.content_text || `[${topPin.content_type}]`}
+            </p>
+          </div>
+          <span
+            role="button"
+            tabIndex={0}
+            aria-label="Unpin"
+            onClick={(e) => {
+              e.stopPropagation();
+              void handleUnpinMessage(topPin.id);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                e.stopPropagation();
+                void handleUnpinMessage(topPin.id);
+              }
+            }}
+            className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+          </span>
+        </button>
+      )}
+
       {/* Messages Area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
         {loading ? (
@@ -1363,23 +1475,30 @@ export function MessageThread({
                       const next = own?.emoji === emoji ? "" : emoji;
                       void postReaction(msg.id, next);
                     };
+                    const pinned =
+                      !!msg.pinned_until &&
+                      new Date(msg.pinned_until).getTime() > Date.now();
                     return (
-                      <MessageActions
-                        key={msg.id}
-                        message={msg}
-                        onReply={() => handleStartReply(msg)}
-                        onReact={(emoji) => {
-                          if (emoji) void postReaction(msg.id, emoji);
-                        }}
-                      >
-                        <MessageBubble
+                      <div key={msg.id} id={`msg-${msg.id}`} className="scroll-mt-4">
+                        <MessageActions
                           message={msg}
-                          reply={reply}
-                          reactions={msgReactions}
-                          currentUserId={user?.id}
-                          onToggleReaction={handlePillToggle}
-                        />
-                      </MessageActions>
+                          onReply={() => handleStartReply(msg)}
+                          onReact={(emoji) => {
+                            if (emoji) void postReaction(msg.id, emoji);
+                          }}
+                          isPinned={pinned}
+                          onPin={(hours) => void handlePinMessage(msg.id, hours)}
+                          onUnpin={() => void handleUnpinMessage(msg.id)}
+                        >
+                          <MessageBubble
+                            message={msg}
+                            reply={reply}
+                            reactions={msgReactions}
+                            currentUserId={user?.id}
+                            onToggleReaction={handlePillToggle}
+                          />
+                        </MessageActions>
+                      </div>
                     );
                   })}
                 </div>

@@ -4,8 +4,23 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../../hooks/use-auth';
 import { useAppTheme } from '../../../hooks/use-theme';
+import { useWhatsappStatus, type WhatsappStatus } from '../../../hooks/use-whatsapp-status';
 import { Avatar } from '../../../components/Avatar';
 import { radius, scaleFontSizes, spacing, type Palette } from '../../../lib/theme';
+
+function statusDotColor(status: WhatsappStatus, colors: Palette): string {
+  if (status === 'green') return colors.success;
+  if (status === 'yellow') return '#F59E0B';
+  if (status === 'red') return colors.danger;
+  return colors.textFaint;
+}
+
+function statusLabel(status: WhatsappStatus): string {
+  if (status === 'green') return 'Connected';
+  if (status === 'yellow') return 'Needs attention';
+  if (status === 'red') return 'Not connected';
+  return 'Checking…';
+}
 
 function SettingsRow({
   icon,
@@ -41,11 +56,22 @@ export default function SettingsScreen() {
   const { profile, account, accountRole, canManageMembers, canEditSettings, signOut } = useAuth();
   const { colors, fontScale } = useAppTheme();
   const styles = useMemo(() => scaleFontSizes(makeStyles(colors), fontScale), [colors, fontScale]);
+  const waStatus = useWhatsappStatus();
 
   return (
     <View style={styles.container}>
       <View style={styles.profileHeader}>
-        <Avatar label={profile?.full_name || profile?.email || '?'} size={56} />
+        <View>
+          <Avatar label={profile?.full_name || profile?.email || '?'} size={56} />
+          {/* WhatsApp connection health — green/amber/red/grey, same
+           *  classification as the web sidebar's dot. */}
+          <View
+            style={[
+              styles.statusDot,
+              { backgroundColor: statusDotColor(waStatus, colors), borderColor: colors.surface },
+            ]}
+          />
+        </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.profileName} numberOfLines={1}>
             {profile?.full_name || 'Unnamed'}
@@ -82,13 +108,22 @@ export default function SettingsScreen() {
             styles={styles}
           />
         )}
-        <SettingsRow
-          icon="logo-whatsapp"
-          value="WhatsApp Status"
+        <Pressable
+          style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
           onPress={() => router.push('/settings/whatsapp')}
-          colors={colors}
-          styles={styles}
-        />
+        >
+          <View style={styles.rowIcon}>
+            <Ionicons name="logo-whatsapp" size={18} color={colors.accent} />
+          </View>
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
+            <Text style={styles.rowValue}>WhatsApp Status</Text>
+            <View
+              style={[styles.inlineDot, { backgroundColor: statusDotColor(waStatus, colors) }]}
+            />
+            <Text style={styles.rowSubtle}>{statusLabel(waStatus)}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
+        </Pressable>
         {canEditSettings && (
           <SettingsRow
             icon="sparkles-outline"
@@ -130,6 +165,17 @@ function makeStyles(colors: Palette) {
     },
     profileName: { color: colors.text, fontSize: 17, fontWeight: '700' },
     profileEmail: { color: colors.textMuted, fontSize: 13, marginTop: 2 },
+    statusDot: {
+      position: 'absolute',
+      bottom: -1,
+      right: -1,
+      width: 14,
+      height: 14,
+      borderRadius: 7,
+      borderWidth: 2,
+    },
+    inlineDot: { width: 7, height: 7, borderRadius: 3.5 },
+    rowSubtle: { color: colors.textFaint, fontSize: 12 },
     section: {
       backgroundColor: colors.surface,
       borderRadius: radius.lg,

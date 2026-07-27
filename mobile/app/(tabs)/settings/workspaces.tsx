@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, FlatList, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, FlatList, Pressable, StyleSheet, ActivityIndicator, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { supabase, apiFetch } from '../../../lib/supabase';
@@ -167,9 +167,139 @@ function WorkspaceGeneralCard({
   );
 }
 
+/**
+ * Owner-only delete for the CURRENT workspace — ported from web's danger
+ * zone in workspace-general-settings.tsx. Same DELETE
+ * /api/account/workspaces/[id] route, so the owner check, "not your only
+ * workspace" guard, and cascade all live server-side either way; this is
+ * just the type-to-confirm gate on the client.
+ */
+function DangerZoneCard({
+  colors,
+  styles,
+  accountId,
+  accountName,
+  onDeleted,
+}: {
+  colors: Palette;
+  styles: ReturnType<typeof makeStyles>;
+  accountId: string;
+  accountName: string;
+  onDeleted: () => void;
+}) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmName, setConfirmName] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const matches = confirmName.trim() === accountName.trim();
+
+  async function handleDelete() {
+    setDeleting(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/account/workspaces/${accountId}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || 'Failed to delete workspace');
+        setDeleting(false);
+        return;
+      }
+      setConfirmOpen(false);
+      onDeleted();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not reach the server');
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <View style={[styles.card, styles.dangerCard]}>
+      <View style={styles.dangerTitleRow}>
+        <Ionicons name="warning-outline" size={16} color={colors.dangerMuted} />
+        <Text style={[styles.cardTitle, { color: colors.dangerMuted }]}>Delete workspace</Text>
+      </View>
+      <Text style={styles.lockRowText}>
+        Permanently deletes this workspace and everything in it — contacts, conversations,
+        messages, templates and settings. This cannot be undone.
+      </Text>
+      <Pressable
+        style={styles.dangerButton}
+        onPress={() => {
+          setConfirmName('');
+          setError(null);
+          setConfirmOpen(true);
+        }}
+      >
+        <Ionicons name="trash-outline" size={16} color={colors.dangerMuted} />
+        <Text style={styles.dangerButtonText}>Delete this workspace</Text>
+      </Pressable>
+
+      <Modal
+        visible={confirmOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => (deleting ? null : setConfirmOpen(false))}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={[styles.cardTitle, { color: colors.dangerMuted }]}>
+              Delete “{accountName}”?
+            </Text>
+            <Text style={styles.lockRowText}>
+              This wipes all of this workspace&apos;s data permanently. Type the workspace name
+              to confirm.
+            </Text>
+            {error && <Text style={styles.errorTextInline}>{error}</Text>}
+            <TextInput
+              style={styles.input}
+              value={confirmName}
+              onChangeText={setConfirmName}
+              placeholder={accountName}
+              placeholderTextColor={colors.textFaint}
+              autoFocus
+              editable={!deleting}
+            />
+            <View style={styles.modalActions}>
+              <Pressable
+                style={[styles.outlineButton, { flex: 1 }]}
+                onPress={() => setConfirmOpen(false)}
+                disabled={deleting}
+              >
+                <Text style={styles.outlineButtonText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.dangerButton,
+                  styles.dangerButtonFilled,
+                  { flex: 1 },
+                  (!matches || deleting) && { opacity: 0.5 },
+                ]}
+                onPress={handleDelete}
+                disabled={!matches || deleting}
+              >
+                {deleting ? (
+                  <ActivityIndicator color={colors.white} size="small" />
+                ) : (
+                  <>
+                    <Ionicons name="trash-outline" size={16} color={colors.white} />
+                    <Text style={[styles.dangerButtonText, { color: colors.white }]}>Delete</Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
 export default function WorkspacesScreen() {
   const router = useRouter();
-  const { user, accountId, canEditSettings, refreshProfile } = useAuth();
+  const { user, account, accountId, isOwner, canEditSettings, refreshProfile } = useAuth();
   const { colors, fontScale } = useAppTheme();
   const styles = useMemo(() => scaleFontSizes(makeStyles(colors), fontScale), [colors, fontScale]);
 
@@ -217,6 +347,15 @@ export default function WorkspacesScreen() {
     }
   }
 
+  async function handleDeleted() {
+    // The DELETE route's RPC already relocated our profile.account_id
+    // server-side — same post-action shape as handleSwitch above:
+    // refresh the auth context, re-point push, remount the tab stack.
+    await refreshProfile();
+    void syncPushTokenWithBackend();
+    router.replace('/(tabs)');
+  }
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -244,6 +383,15 @@ export default function WorkspacesScreen() {
               canEditSettings={canEditSettings}
               refreshProfile={refreshProfile}
             />
+            {isOwner && accountId && (
+              <DangerZoneCard
+                colors={colors}
+                styles={styles}
+                accountId={accountId}
+                accountName={account?.name ?? ''}
+                onDeleted={handleDeleted}
+              />
+            )}
             {workspaces.length > 1 && <Text style={styles.sectionLabel}>Switch workspace</Text>}
           </View>
         }
@@ -338,5 +486,40 @@ function makeStyles(colors: Palette) {
       alignItems: 'center',
     },
     outlineButtonText: { color: colors.textSecondary, fontWeight: '600', fontSize: 13 },
+    dangerCard: { borderColor: colors.dangerBorder },
+    dangerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    dangerButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      borderWidth: 1,
+      borderColor: colors.dangerBorder,
+      borderRadius: 8,
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+      alignSelf: 'flex-start',
+      marginTop: 4,
+    },
+    dangerButtonFilled: { backgroundColor: colors.danger, borderColor: colors.danger },
+    dangerButtonText: { color: colors.dangerMuted, fontWeight: '600', fontSize: 13 },
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 24,
+    },
+    modalCard: {
+      width: '100%',
+      maxWidth: 380,
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 16,
+      gap: 10,
+    },
+    modalActions: { flexDirection: 'row', gap: 10, marginTop: 4 },
   });
 }

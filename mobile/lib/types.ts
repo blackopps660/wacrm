@@ -128,4 +128,8 @@ export interface Message {
   interactive_reply_id?: string;
   error_message?: string | null;
   deleted_at?: string | null;
+  /** When this message was pinned to the top of its conversation (migration 057). */
+  pinned_at?: string | null;
+  /** When the pin auto-expires — counts as pinned only while `pinned_until > now()`. */
+  pinned_until?: string | null;
 }

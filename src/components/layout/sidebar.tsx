@@ -36,6 +36,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher";
+import { useWhatsappStatus } from "@/hooks/use-whatsapp-status";
 
 interface NavItem {
   href: string;
@@ -74,6 +75,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { profile, signOut } = useAuth();
   const totalUnread = useTotalUnread();
+  const waStatus = useWhatsappStatus();
   const unreadNotifications = useUnreadNotifications();
 
   // Close the drawer when route changes — users opened it to navigate,
@@ -242,19 +244,43 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           <WorkspaceSwitcher />
           <DropdownMenu>
             <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted/60 focus:bg-muted/60 focus:outline-none data-popup-open:bg-muted/60">
-              <Avatar className="size-8 shrink-0">
-                {profile?.avatar_url ? (
-                  <AvatarImage
-                    src={profile.avatar_url}
-                    alt={profile.full_name ?? "Avatar"}
-                  />
-                ) : null}
-                <AvatarFallback className="bg-primary/10 text-sm font-medium text-primary">
-                  {profile?.full_name?.charAt(0)?.toUpperCase() ??
-                    profile?.email?.charAt(0)?.toUpperCase() ??
-                    "U"}
-                </AvatarFallback>
-              </Avatar>
+              <div className="relative shrink-0">
+                <Avatar className="size-8">
+                  {profile?.avatar_url ? (
+                    <AvatarImage
+                      src={profile.avatar_url}
+                      alt={profile.full_name ?? "Avatar"}
+                    />
+                  ) : null}
+                  <AvatarFallback className="bg-primary/10 text-sm font-medium text-primary">
+                    {profile?.full_name?.charAt(0)?.toUpperCase() ??
+                      profile?.email?.charAt(0)?.toUpperCase() ??
+                      "U"}
+                  </AvatarFallback>
+                </Avatar>
+                {/* WhatsApp connection health, mirrored from Settings.
+                 *  green = connected, amber = configured-but-broken,
+                 *  red = not set up, grey = still checking. */}
+                <span
+                  className={cn(
+                    "absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full ring-2 ring-background",
+                    waStatus === "green" && "bg-emerald-500",
+                    waStatus === "yellow" && "bg-amber-500",
+                    waStatus === "red" && "bg-red-500",
+                    waStatus === "unknown" && "bg-muted-foreground/40",
+                  )}
+                  title={
+                    waStatus === "green"
+                      ? "WhatsApp connected"
+                      : waStatus === "yellow"
+                        ? "WhatsApp needs attention"
+                        : waStatus === "red"
+                          ? "WhatsApp not connected"
+                          : "Checking WhatsApp status…"
+                  }
+                  aria-hidden
+                />
+              </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-foreground">
                   {profile?.full_name ?? "User"}

@@ -12,12 +12,14 @@ import {
   Modal,
   Linking,
   Animated,
+  ToastAndroid,
 } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAudioPlayer, useAudioRecorder, useAudioRecorderState, RecordingPresets, requestRecordingPermissionsAsync } from 'expo-audio';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase, apiFetch } from '../../../lib/supabase';
 import { useAuth } from '../../../hooks/use-auth';
@@ -44,6 +46,23 @@ interface TeamMember {
   user_id: string;
   full_name: string;
   email: string | null;
+}
+
+// WhatsApp's own pin windows. Stored as hours so the handler can do
+// `pinned_until = now + hours` without a date library.
+const PIN_DURATIONS: { label: string; hours: number }[] = [
+  { label: '24 hours', hours: 24 },
+  { label: '7 days', hours: 24 * 7 },
+  { label: '30 days', hours: 24 * 30 },
+];
+
+/** Small cross-platform "toast": ToastAndroid on Android, a no-op-safe
+ *  fallback elsewhere (iOS has no system toast — the optimistic UI
+ *  change is feedback enough for copy/pin). */
+function showToast(message: string) {
+  if (Platform.OS === 'android') {
+    ToastAndroid.show(message, ToastAndroid.SHORT);
+  }
 }
 
 const sendSound = require('../../../assets/sounds/send.wav');
@@ -334,6 +353,7 @@ export default function MessageThreadScreen() {
   const [forwardSearch, setForwardSearch] = useState('');
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [deleteSheetOpen, setDeleteSheetOpen] = useState(false);
+  const [pinSheetOpen, setPinSheetOpen] = useState(false);
   const [assignedAgentId, setAssignedAgentId] = useState<string | null>(null);
   const [ownerKind, setOwnerKind] = useState<ConversationOwnerKind>('unassigned');
   const [teamMembers, setTeamMembers] = useState<TeamMember[] | null>(null);
@@ -970,6 +990,60 @@ export default function MessageThreadScreen() {
     await supabase.from('messages').update({ deleted_at: new Date().toISOString() }).eq('id', messageId);
   }
 
+  async function handleCopyMessage() {
+    const text = selectedMessage?.content_text;
+    setSelectedMessage(null);
+    if (!text) {
+      showToast('Nothing to copy');
+      return;
+    }
+    await Clipboard.setStringAsync(text);
+    showToast('Copied');
+  }
+
+  // Pin the selected message for `hours` (24h / 7d / 30d). Optimistic:
+  // stamp pinned_at/pinned_until locally, then persist. Purely local to
+  // this app's inbox — WhatsApp has no pin API for the customer side.
+  async function handlePinMessage(hours: number) {
+    if (!selectedMessage) return;
+    const messageId = selectedMessage.id;
+    const pinnedAt = new Date().toISOString();
+    const pinnedUntil = new Date(Date.now() + hours * 3600_000).toISOString();
+    setPinSheetOpen(false);
+    setSelectedMessage(null);
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId ? { ...m, pinned_at: pinnedAt, pinned_until: pinnedUntil } : m,
+      ),
+    );
+    const { error } = await supabase
+      .from('messages')
+      .update({ pinned_at: pinnedAt, pinned_until: pinnedUntil })
+      .eq('id', messageId);
+    if (error) {
+      // Roll back the optimistic pin on failure.
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId ? { ...m, pinned_at: null, pinned_until: null } : m,
+        ),
+      );
+      showToast('Failed to pin');
+    }
+  }
+
+  async function handleUnpinMessage(messageId: string) {
+    setSelectedMessage(null);
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId ? { ...m, pinned_at: null, pinned_until: null } : m,
+      ),
+    );
+    await supabase
+      .from('messages')
+      .update({ pinned_at: null, pinned_until: null })
+      .eq('id', messageId);
+  }
+
   const filteredForwardConversations = useMemo(() => {
     if (!forwardConversations) return [];
     const term = forwardSearch.trim().toLowerCase();
@@ -1043,6 +1117,39 @@ export default function MessageThreadScreen() {
   const isRecording = isHolding || recorderState.isRecording;
   const recordSeconds = Math.floor((recorderState.durationMillis ?? 0) / 1000);
 
+  // The pin shown in the banner: the most-recently-pinned message whose
+  // window hasn't lapsed (pinned_until > now). Expiry is a pure
+  // read-time comparison — no sweeper needed.
+  const topPin = useMemo<Message | null>(() => {
+    const now = Date.now();
+    const active = messages
+      .filter((m) => m.pinned_until && new Date(m.pinned_until).getTime() > now)
+      .sort(
+        (a, b) =>
+          new Date(b.pinned_at ?? 0).getTime() - new Date(a.pinned_at ?? 0).getTime(),
+      );
+    return active[0] ?? null;
+  }, [messages]);
+
+  const selectedIsPinned =
+    !!selectedMessage?.pinned_until &&
+    new Date(selectedMessage.pinned_until).getTime() > Date.now();
+
+  // Jump to a pinned message when its banner is tapped. scrollToIndex on
+  // a not-yet-measured row throws, so onScrollToIndexFailed (wired on the
+  // FlatList) provides the fallback.
+  const scrollToMessage = useCallback(
+    (messageId: string) => {
+      const index = listData.findIndex(
+        (item) => item.kind === 'message' && item.id === messageId,
+      );
+      if (index >= 0) {
+        listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+      }
+    },
+    [listData],
+  );
+
   return (
     // On Android this screen relies purely on the native
     // `windowSoftInputMode="adjustPan"` (set in app.json) to keep the
@@ -1069,6 +1176,32 @@ export default function MessageThreadScreen() {
               1 selected
             </Text>
             <View style={styles.headerActions}>
+              {selectedIsPinned ? (
+                <Pressable
+                  style={styles.headerIconButton}
+                  onPress={() => handleUnpinMessage(selectedMessage.id)}
+                  hitSlop={8}
+                >
+                  <Ionicons name="pin" size={20} color={colors.accent} />
+                </Pressable>
+              ) : (
+                <Pressable
+                  style={styles.headerIconButton}
+                  onPress={() => setPinSheetOpen(true)}
+                  hitSlop={8}
+                >
+                  <Ionicons name="pin-outline" size={20} color={colors.textSecondary} />
+                </Pressable>
+              )}
+              {selectedMessage.content_text ? (
+                <Pressable
+                  style={styles.headerIconButton}
+                  onPress={handleCopyMessage}
+                  hitSlop={8}
+                >
+                  <Ionicons name="copy-outline" size={20} color={colors.textSecondary} />
+                </Pressable>
+              ) : null}
               <Pressable
                 style={styles.headerIconButton}
                 onPress={() => handleForward(selectedMessage)}
@@ -1149,6 +1282,37 @@ export default function MessageThreadScreen() {
         </View>
       )}
 
+      {/* Pinned-message bar — WhatsApp-style, sits under the header and
+       *  jumps to the message on tap. Hidden while searching to keep the
+       *  results view uncluttered. */}
+      {topPin && !searchOpen && (
+        <Pressable style={styles.pinnedBar} onPress={() => scrollToMessage(topPin.id)}>
+          <Ionicons name="pin" size={14} color={colors.accent} />
+          <View style={styles.pinnedBarBody}>
+            <Text style={styles.pinnedBarLabel}>Pinned message</Text>
+            <Text style={styles.pinnedBarPreview} numberOfLines={1}>
+              {topPin.content_text?.trim() ||
+                (topPin.content_type === 'image'
+                  ? 'Photo'
+                  : topPin.content_type === 'video'
+                    ? 'Video'
+                    : topPin.content_type === 'audio'
+                      ? 'Voice message'
+                      : topPin.content_type === 'document'
+                        ? 'Document'
+                        : 'Message')}
+            </Text>
+          </View>
+          <Pressable
+            hitSlop={8}
+            onPress={() => handleUnpinMessage(topPin.id)}
+            style={styles.pinnedBarClose}
+          >
+            <Ionicons name="close" size={16} color={colors.textFaint} />
+          </Pressable>
+        </Pressable>
+      )}
+
       {contact?.blocked_at && (
         <View style={styles.blockedBanner}>
           <Ionicons name="ban" size={14} color={colors.dangerMuted} />
@@ -1168,6 +1332,15 @@ export default function MessageThreadScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           onContentSizeChange={() => !isSearching && listRef.current?.scrollToEnd({ animated: false })}
+          onScrollToIndexFailed={({ index }) => {
+            // Row wasn't measured yet (tapping the pin bar for an
+            // off-screen message). Nudge to an approximate offset, then
+            // retry the precise scroll once layout settles.
+            listRef.current?.scrollToOffset({ offset: index * 72, animated: false });
+            setTimeout(() => {
+              listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+            }, 120);
+          }}
           renderItem={({ item }) => {
             if (item.kind === 'date') return <DateSeparator label={item.label} styles={styles} />;
             if (item.kind === 'pending') {
@@ -1609,6 +1782,30 @@ export default function MessageThreadScreen() {
           </View>
         </Pressable>
       </Modal>
+
+      <Modal
+        visible={pinSheetOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPinSheetOpen(false)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setPinSheetOpen(false)}>
+          <View style={styles.menuCard}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.pinSheetTitle}>Pin message</Text>
+            {PIN_DURATIONS.map((d) => (
+              <Pressable
+                key={d.hours}
+                style={styles.menuItem}
+                onPress={() => handlePinMessage(d.hours)}
+              >
+                <Ionicons name="pin-outline" size={20} color={colors.text} />
+                <Text style={styles.menuItemText}>{d.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </Pressable>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -1678,6 +1875,20 @@ function makeStyles(colors: Palette) {
       paddingVertical: spacing.sm,
     },
     blockedBannerText: { color: colors.dangerMuted, fontSize: 12, flex: 1 },
+    pinnedBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      backgroundColor: colors.surface,
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.sm,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
+    },
+    pinnedBarBody: { flex: 1, minWidth: 0 },
+    pinnedBarLabel: { color: colors.accent, fontSize: 11, fontWeight: '600' },
+    pinnedBarPreview: { color: colors.textSecondary, fontSize: 13, marginTop: 1 },
+    pinnedBarClose: { padding: 2 },
     messageList: { flex: 1, backgroundColor: colors.chatBg },
     listContent: { padding: spacing.md, gap: 6 },
     dateSeparator: { alignItems: 'center', marginVertical: spacing.sm },
@@ -1849,6 +2060,12 @@ function makeStyles(colors: Palette) {
       borderBottomColor: colors.border,
     },
     menuItemText: { color: colors.textSecondary, fontSize: 15 },
+    pinSheetTitle: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: '600',
+      marginBottom: spacing.xs,
+    },
     stageDot: { width: 8, height: 8, borderRadius: 4 },
     mediaViewerCard: {
       backgroundColor: colors.surface,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { CornerUpLeft, Copy, SmilePlus } from "lucide-react";
+import { CornerUpLeft, Copy, SmilePlus, Pin, PinOff } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -15,10 +15,23 @@ import type { Message } from "@/types";
 // set keeps the affordance familiar without pulling in a 300KB emoji library.
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
+// WhatsApp's own pin-duration choices. Values are hours so the caller can
+// compute `pinned_until = now + hours` without a date-math library.
+export const PIN_DURATIONS: { label: string; hours: number }[] = [
+  { label: "24 hours", hours: 24 },
+  { label: "7 days", hours: 24 * 7 },
+  { label: "30 days", hours: 24 * 30 },
+];
+
 interface MessageActionsProps {
   message: Message;
   onReply: () => void;
   onReact: (emoji: string) => void;
+  /** True when this message is currently pinned (pinned_until in the future). */
+  isPinned: boolean;
+  /** Pin for the given number of hours (from PIN_DURATIONS). */
+  onPin: (hours: number) => void;
+  onUnpin: () => void;
   children: ReactNode;
 }
 
@@ -31,6 +44,9 @@ export function MessageActions({
   message,
   onReply,
   onReact,
+  isPinned,
+  onPin,
+  onUnpin,
   children,
 }: MessageActionsProps) {
   // Touch devices have no hover. Long-press fires `contextmenu`; we capture
@@ -38,6 +54,7 @@ export function MessageActions({
   // interacts elsewhere.
   const [touchOpen, setTouchOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pinMenuOpen, setPinMenuOpen] = useState(false);
 
   const isAgent =
     message.sender_type === "agent" || message.sender_type === "bot";
@@ -73,6 +90,17 @@ export function MessageActions({
     setTouchOpen(false);
   };
 
+  const handlePin = (hours: number) => {
+    onPin(hours);
+    setPinMenuOpen(false);
+    setTouchOpen(false);
+  };
+
+  const handleUnpin = () => {
+    onUnpin();
+    setTouchOpen(false);
+  };
+
   // Row alignment lives here (not in MessageBubble) so the `group/actions`
   // hover region matches the bubble's content width — hovering empty space
   // in the row no longer reveals the toolbar.
@@ -93,7 +121,7 @@ export function MessageActions({
       <div className="group/actions relative min-w-0 max-w-[75%]">
         {children}
       <div
-        data-touch-open={touchOpen || pickerOpen ? "true" : undefined}
+        data-touch-open={touchOpen || pickerOpen || pinMenuOpen ? "true" : undefined}
         className={cn(
           "absolute -top-3 z-10 flex h-7 items-center gap-0.5 rounded-full border border-border bg-popover/95 px-1 shadow-md backdrop-blur-sm transition-opacity",
           "opacity-0 group-hover/actions:opacity-100 group-focus-within/actions:opacity-100",
@@ -141,6 +169,40 @@ export function MessageActions({
         >
           <Copy className="h-3.5 w-3.5" />
         </button>
+        {isPinned ? (
+          <button
+            type="button"
+            onClick={handleUnpin}
+            className="flex h-5 w-5 items-center justify-center rounded-full text-primary hover:bg-muted"
+            aria-label="Unpin"
+          >
+            <PinOff className="h-3.5 w-3.5" />
+          </button>
+        ) : (
+          <Popover open={pinMenuOpen} onOpenChange={setPinMenuOpen}>
+            <PopoverTrigger
+              className="flex h-5 w-5 items-center justify-center rounded-full text-popover-foreground hover:bg-muted hover:text-foreground"
+              aria-label="Pin"
+            >
+              <Pin className="h-3.5 w-3.5" />
+            </PopoverTrigger>
+            <PopoverContent className="flex w-auto flex-col p-1" sideOffset={6}>
+              <span className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Pin for
+              </span>
+              {PIN_DURATIONS.map((d) => (
+                <button
+                  key={d.hours}
+                  type="button"
+                  onClick={() => handlePin(d.hours)}
+                  className="rounded px-2 py-1.5 text-left text-sm text-popover-foreground hover:bg-muted"
+                >
+                  {d.label}
+                </button>
+              ))}
+            </PopoverContent>
+          </Popover>
+        )}
       </div>
       </div>
     </div>

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Building2, Loader2, Lock, LockOpen } from "lucide-react";
+import { Building2, Loader2, Lock, LockOpen, Trash2, TriangleAlert } from "lucide-react";
 
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,14 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { SettingsPanelHead } from "./settings-panel-head";
 
 const MAX_NAME_LEN = 80;
@@ -27,13 +35,21 @@ const MAX_NAME_LEN = 80;
  * bypassed by a client that skips the disabled-input UI state.
  */
 export function WorkspaceGeneralSettings() {
-  const { account, canEditSettings, profileLoading, refreshProfile } = useAuth();
+  const { account, canEditSettings, isOwner, profileLoading, refreshProfile } =
+    useAuth();
 
   const [name, setName] = useState("");
   const [isLocked, setIsLocked] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [savingName, setSavingName] = useState(false);
   const [togglingLock, setTogglingLock] = useState(false);
+
+  // Delete-workspace danger zone. Owner-only, and gated behind a
+  // type-the-name confirmation so a stray click can't wipe an account's
+  // entire history.
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [confirmName, setConfirmName] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -108,6 +124,33 @@ export function WorkspaceGeneralSettings() {
       setTogglingLock(false);
     }
   }
+
+  async function handleDelete() {
+    if (!account) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/account/workspaces/${account.id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "Failed to delete workspace");
+        setDeleting(false);
+        return;
+      }
+      // Hard reload into the workspace the server switched us to — same
+      // pattern as workspace-switcher, so every account-scoped hook and
+      // query re-fetches against the new active workspace cleanly.
+      toast.success("Workspace deleted");
+      window.location.href = "/dashboard";
+    } catch (err) {
+      console.error("[WorkspaceGeneralSettings] delete error:", err);
+      toast.error("Could not reach the server");
+      setDeleting(false);
+    }
+  }
+
+  const confirmMatches = confirmName.trim() === (account?.name ?? "").trim();
 
   return (
     <section className="max-w-2xl animate-in fade-in-50 duration-200">
@@ -205,6 +248,93 @@ export function WorkspaceGeneralSettings() {
           )}
         </CardContent>
       </Card>
+
+      {/* Danger zone — owner-only. Deleting a workspace cascade-wipes
+       *  every contact, conversation, message and setting under it and
+       *  cannot be undone, so it lives behind a type-the-name confirm. */}
+      {isOwner && (
+        <Card className="mt-6 border-destructive/40">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-destructive">
+              <TriangleAlert className="size-4" />
+              Delete workspace
+            </CardTitle>
+            <CardDescription className="text-muted-foreground">
+              Permanently deletes this workspace and everything in it —
+              contacts, conversations, messages, templates and settings.
+              This cannot be undone. You&apos;ll be switched to another
+              workspace.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setConfirmName("");
+                setDeleteOpen(true);
+              }}
+              disabled={!loaded}
+              className="border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            >
+              <Trash2 className="size-4" />
+              Delete this workspace
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <TriangleAlert className="size-4" />
+              Delete “{account?.name}”?
+            </DialogTitle>
+            <DialogDescription>
+              This wipes all of this workspace&apos;s data permanently and
+              cannot be undone. Type the workspace name to confirm.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            <Label className="text-muted-foreground">
+              Workspace name
+            </Label>
+            <Input
+              value={confirmName}
+              onChange={(e) => setConfirmName(e.target.value)}
+              placeholder={account?.name ?? ""}
+              autoFocus
+              className="bg-muted border-border text-foreground"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteOpen(false)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={!confirmMatches || deleting}
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                <>
+                  <Trash2 className="size-4" />
+                  Delete workspace
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

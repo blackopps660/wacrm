@@ -267,6 +267,10 @@ export interface Message {
   error_message?: string | null;
   /** "Delete for me" (mobile) — hides the message from this account's own inbox view only; WhatsApp gives businesses no API to unsend a message from the customer's device. */
   deleted_at?: string | null;
+  /** When this message was pinned to the top of its conversation (migration 057). NULL = never pinned/unpinned. */
+  pinned_at?: string | null;
+  /** When the pin auto-expires. Counts as pinned only while `pinned_until > now()`. */
+  pinned_until?: string | null;
 }
 
 export type ReactionActor = 'customer' | 'agent';
