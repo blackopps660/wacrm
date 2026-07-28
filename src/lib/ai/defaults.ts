@@ -51,7 +51,7 @@ export function aiContextMessageLimit(): number {
  */
 export function buildSystemPrompt(args: {
   userPrompt: string | null
-  mode: 'draft' | 'auto_reply'
+  mode: 'draft' | 'auto_reply' | 'rescue'
   /** Knowledge-base excerpts retrieved for the current question. */
   knowledge?: string[]
   /** True when the account has at least one agent action enabled —
@@ -80,6 +80,15 @@ export function buildSystemPrompt(args: {
         'You may also have tools available to add/remove tags, update a contact field, or trigger an automation. Each tool describes exactly when to use it — most messages just need a normal reply, not a tool call, so only use one when the situation clearly matches its description.',
       )
     }
+  }
+
+  if (mode === 'rescue') {
+    parts.push(
+      'The customer sent the last message a while ago and the human agent handling this conversation has not replied yet — WhatsApp will stop allowing free replies to them 24 hours after their message, so you are sending ONE short, natural check-in to keep the conversation open until the agent gets to it. ' +
+        'You may briefly acknowledge or move their last message forward using the business context and knowledge base below, but do not attempt to fully resolve anything that needs the human agent\'s judgment — the goal is just to prompt a reply, not to close the conversation out. ' +
+        'Never say or imply that you are an AI, a bot, an automated system, or a reminder — write exactly as the business\'s own agent would. Do not mention the 24-hour window, WhatsApp policy, or that a human hasn\'t responded yet. ' +
+        'Output only the message text with nothing else.',
+    )
   }
 
   if (userPrompt && userPrompt.trim()) {

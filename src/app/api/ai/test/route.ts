@@ -76,6 +76,9 @@ export async function POST(request: Request) {
         autoReplyMaxPerConversation: 3,
         embeddingsApiKey: null,
         defaultNewConversationOwner: 'human',
+        rescueReplyEnabled: false,
+        rescueAfterHours: 20,
+        rescueMaxPerConversation: 2,
         actions: {
           updateTags: { enabled: false, guidelines: null },
           updateContactFields: { enabled: false, guidelines: null },

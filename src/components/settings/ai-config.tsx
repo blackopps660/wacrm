@@ -117,6 +117,9 @@ export function AiConfig({ agentId, isDefault, onSaved, onDeleted }: AiConfigPro
   const [defaultNewConversationOwner, setDefaultNewConversationOwner] =
     useState<'ai' | 'human'>('human');
   const [actions, setActions] = useState<AiActionsConfig>(DISABLED_ACTIONS);
+  const [rescueReplyEnabled, setRescueReplyEnabled] = useState(false);
+  const [rescueAfterHours, setRescueAfterHours] = useState(20);
+  const [rescueMaxPerConversation, setRescueMaxPerConversation] = useState(2);
 
   const fetchConfig = useCallback(async (id: string) => {
     setLoading(true);
@@ -145,6 +148,15 @@ export function AiConfig({ agentId, isDefault, onSaved, onDeleted }: AiConfigPro
         data.default_new_conversation_owner === 'ai' ? 'ai' : 'human',
       );
       setActions(normalizeActionsFromResponse(data.actions));
+      setRescueReplyEnabled(Boolean(data.rescue_reply_enabled));
+      setRescueAfterHours(
+        typeof data.rescue_after_hours === 'number' ? data.rescue_after_hours : 20,
+      );
+      setRescueMaxPerConversation(
+        typeof data.rescue_max_per_conversation === 'number'
+          ? data.rescue_max_per_conversation
+          : 2,
+      );
       setHasStoredKey(Boolean(data.has_key));
       setApiKey(data.has_key ? MASKED_KEY : '');
       setKeyEdited(false);
@@ -180,6 +192,9 @@ export function AiConfig({ agentId, isDefault, onSaved, onDeleted }: AiConfigPro
       setMaxPerConversation(3);
       setDefaultNewConversationOwner('human');
       setActions(DISABLED_ACTIONS);
+      setRescueReplyEnabled(false);
+      setRescueAfterHours(20);
+      setRescueMaxPerConversation(2);
       setLoading(false);
     }
   }, [agentId, fetchConfig]);
@@ -213,6 +228,9 @@ export function AiConfig({ agentId, isDefault, onSaved, onDeleted }: AiConfigPro
     auto_reply_max_per_conversation: maxPerConversation,
     default_new_conversation_owner: defaultNewConversationOwner,
     actions,
+    rescue_reply_enabled: rescueReplyEnabled,
+    rescue_after_hours: rescueAfterHours,
+    rescue_max_per_conversation: rescueMaxPerConversation,
   });
 
   const handleTest = async () => {
@@ -595,6 +613,86 @@ export function AiConfig({ agentId, isDefault, onSaved, onDeleted }: AiConfigPro
                 </label>
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Zap className="h-4 w-4 text-primary" /> 24-hour rescue reply
+            </CardTitle>
+            <CardDescription>
+              WhatsApp blocks free replies once 24h pass since the customer&apos;s last
+              message. If a conversation is still waiting on your agent when it&apos;s
+              about to hit that wall, the agent can send ONE short, natural check-in
+              to keep it open — it never takes the conversation over, and stops the
+              moment your agent (or the customer) replies.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  Enable 24-hour rescue reply
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Only fires when the customer&apos;s message is still unanswered — a
+                  customer who has gone quiet on their own is left alone.
+                </p>
+              </div>
+              <Switch
+                checked={rescueReplyEnabled}
+                onCheckedChange={setRescueReplyEnabled}
+                disabled={disabled || !isActive}
+              />
+            </div>
+
+            {rescueReplyEnabled && (
+              <>
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <Label htmlFor="ai-rescue-hours">Send after (hours unanswered)</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Must stay under 24 so the reply can still send.
+                    </p>
+                  </div>
+                  <Input
+                    id="ai-rescue-hours"
+                    type="number"
+                    min={1}
+                    max={23}
+                    value={rescueAfterHours}
+                    onChange={(e) =>
+                      setRescueAfterHours(
+                        Math.min(23, Math.max(1, Number(e.target.value) || 20)),
+                      )
+                    }
+                    disabled={disabled}
+                    className="w-20"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <Label htmlFor="ai-rescue-max">Max rescue replies per conversation</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Resets whenever your agent actually replies.
+                    </p>
+                  </div>
+                  <Input
+                    id="ai-rescue-max"
+                    type="number"
+                    min={1}
+                    value={rescueMaxPerConversation}
+                    onChange={(e) =>
+                      setRescueMaxPerConversation(Math.max(1, Number(e.target.value) || 2))
+                    }
+                    disabled={disabled}
+                    className="w-20"
+                  />
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
 

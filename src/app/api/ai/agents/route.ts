@@ -79,6 +79,18 @@ export async function POST(request: Request) {
       body.default_new_conversation_owner === 'ai' ? 'ai' : 'human'
     const actions = normalizeActions(body.actions)
 
+    const rescueReplyEnabled = body.rescue_reply_enabled === true
+    let rescueAfterHours = 20
+    if (body.rescue_after_hours !== undefined) {
+      const n = Number(body.rescue_after_hours)
+      rescueAfterHours = Number.isFinite(n) ? Math.min(23, Math.max(1, Math.floor(n))) : 20
+    }
+    let rescueMaxPerConversation = 2
+    if (body.rescue_max_per_conversation !== undefined) {
+      const n = Number(body.rescue_max_per_conversation)
+      rescueMaxPerConversation = Number.isFinite(n) ? Math.max(1, Math.floor(n)) : 2
+    }
+
     const rawEmbeddingsKey =
       typeof body.embeddings_api_key === 'string' ? body.embeddings_api_key.trim() : ''
 
@@ -96,6 +108,9 @@ export async function POST(request: Request) {
         embeddingsApiKey: null,
         defaultNewConversationOwner,
         actions,
+        rescueReplyEnabled,
+        rescueAfterHours,
+        rescueMaxPerConversation,
       })
     } catch (err) {
       if (err instanceof AiError) {
@@ -136,6 +151,9 @@ export async function POST(request: Request) {
         auto_reply_max_per_conversation: maxPer,
         default_new_conversation_owner: defaultNewConversationOwner,
         actions,
+        rescue_reply_enabled: rescueReplyEnabled,
+        rescue_after_hours: rescueAfterHours,
+        rescue_max_per_conversation: rescueMaxPerConversation,
       })
       .select('id')
       .single()

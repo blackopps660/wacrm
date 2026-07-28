@@ -28,7 +28,7 @@ export async function GET(
     const { data, error } = await supabase
       .from('ai_configs')
       .select(
-        'name, provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, default_new_conversation_owner, actions, api_key, embeddings_api_key',
+        'name, provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, default_new_conversation_owner, actions, api_key, embeddings_api_key, rescue_reply_enabled, rescue_after_hours, rescue_max_per_conversation',
       )
       .eq('id', id)
       .eq('account_id', accountId)
@@ -109,6 +109,18 @@ export async function PATCH(
       body.default_new_conversation_owner === 'ai' ? 'ai' : 'human'
     const actions = normalizeActions(body.actions)
 
+    const rescueReplyEnabled = body.rescue_reply_enabled === true
+    let rescueAfterHours = 20
+    if (body.rescue_after_hours !== undefined) {
+      const n = Number(body.rescue_after_hours)
+      rescueAfterHours = Number.isFinite(n) ? Math.min(23, Math.max(1, Math.floor(n))) : 20
+    }
+    let rescueMaxPerConversation = 2
+    if (body.rescue_max_per_conversation !== undefined) {
+      const n = Number(body.rescue_max_per_conversation)
+      rescueMaxPerConversation = Number.isFinite(n) ? Math.max(1, Math.floor(n)) : 2
+    }
+
     const rawKey = typeof body.api_key === 'string' ? body.api_key.trim() : ''
     const rawEmbeddingsKey =
       typeof body.embeddings_api_key === 'string' ? body.embeddings_api_key.trim() : ''
@@ -145,6 +157,9 @@ export async function PATCH(
           embeddingsApiKey: null,
           defaultNewConversationOwner,
           actions,
+          rescueReplyEnabled,
+          rescueAfterHours,
+          rescueMaxPerConversation,
         })
       } catch (err) {
         if (err instanceof AiError) {
@@ -181,6 +196,9 @@ export async function PATCH(
       auto_reply_max_per_conversation: maxPer,
       default_new_conversation_owner: defaultNewConversationOwner,
       actions,
+      rescue_reply_enabled: rescueReplyEnabled,
+      rescue_after_hours: rescueAfterHours,
+      rescue_max_per_conversation: rescueMaxPerConversation,
     }
     if (rawEmbeddingsKey) {
       shared.embeddings_api_key = encrypt(rawEmbeddingsKey)

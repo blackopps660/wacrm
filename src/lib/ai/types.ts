@@ -57,6 +57,17 @@ export interface AiConfig {
   /** Tool-calling actions the agent may take beyond replying with text
    *  (migration 040). */
   actions: AiActionsConfig
+  /** Migration 059 — opt-in nudge on a stale, agent-unanswered
+   *  conversation before the 24h WhatsApp session window closes.
+   *  Independent of `autoReplyEnabled`: this fires on conversations the
+   *  AI does NOT own. */
+  rescueReplyEnabled: boolean
+  /** Hours an inbound customer message can sit unanswered before the
+   *  rescue reply fires. Always < 24. */
+  rescueAfterHours: number
+  /** Cap on rescue nudges per conversation, reset whenever a human
+   *  agent actually replies. */
+  rescueMaxPerConversation: number
 }
 
 /** Provider-agnostic tool schema, translated to each provider's own

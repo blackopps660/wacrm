@@ -15,10 +15,13 @@ interface AiConfigRow {
   embeddings_api_key: string | null
   default_new_conversation_owner: 'ai' | 'human'
   actions: unknown
+  rescue_reply_enabled: boolean
+  rescue_after_hours: number
+  rescue_max_per_conversation: number
 }
 
 const CONFIG_COLUMNS =
-  'id, name, provider, model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, embeddings_api_key, default_new_conversation_owner, actions'
+  'id, name, provider, model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, embeddings_api_key, default_new_conversation_owner, actions, rescue_reply_enabled, rescue_after_hours, rescue_max_per_conversation'
 
 function normalizeActionSetting(raw: unknown): AiActionSetting {
   const obj = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
@@ -86,6 +89,9 @@ function rowToConfig(row: AiConfigRow, accountId: string): AiConfig | null {
     embeddingsApiKey,
     defaultNewConversationOwner: row.default_new_conversation_owner,
     actions: normalizeActions(row.actions),
+    rescueReplyEnabled: row.rescue_reply_enabled,
+    rescueAfterHours: row.rescue_after_hours,
+    rescueMaxPerConversation: row.rescue_max_per_conversation,
   }
 }
 
