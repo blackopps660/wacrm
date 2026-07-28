@@ -14,14 +14,14 @@ export default function TermsPage() {
 
         <section>
           <p className="text-sm leading-relaxed text-slate-300">
-            BlinkMoon provides a WhatsApp Business CRM platform that enables businesses to manage customer conversations using Meta's WhatsApp Business Platform.
+            BlinkMoon provides a WhatsApp Business CRM platform that enables businesses to manage customer conversations using Meta&apos;s WhatsApp Business Platform.
           </p>
         </section>
 
         <section>
           <h2 className="text-lg font-semibold text-slate-100">Acceptable Use</h2>
           <p className="text-sm leading-relaxed text-slate-300">
-            Users agree to use BlinkMoon only for lawful business purposes and in compliance with Meta's Platform Terms and WhatsApp Business Policies.
+            Users agree to use BlinkMoon only for lawful business purposes and in compliance with Meta&apos;s Platform Terms and WhatsApp Business Policies.
           </p>
         </section>
 

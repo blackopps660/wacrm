@@ -19,6 +19,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
+import { NewConversationDialog } from "@/components/inbox/new-conversation-dialog";
 import { toast } from "sonner";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -64,6 +65,7 @@ export default function InboxPage() {
    * below reconciles to the stored value right after mount instead.
    */
   const [contactPanelOpen, setContactPanelOpen] = useState(true);
+  const [newConversationOpen, setNewConversationOpen] = useState(false);
   useEffect(() => {
     try {
       const stored = localStorage.getItem(CONTACT_PANEL_STORAGE_KEY);
@@ -551,6 +553,18 @@ export default function InboxPage() {
     [activeConversation?.id, router]
   );
 
+  // A business-initiated send (New Message dialog) just created a fresh
+  // conversation the list doesn't know about yet — deep-link into it the
+  // same way a dashboard "recent conversations" link would. The
+  // deep-link effect above fetches it directly by id, so it doesn't
+  // matter that it's not in `conversations` yet.
+  const handleNewConversationSent = useCallback(
+    (conversationId: string) => {
+      router.push(`/inbox?c=${conversationId}`, { scroll: false });
+    },
+    [router]
+  );
+
   // Mobile "back" — deselect the conversation so the list pane comes
   // back. Also clears the ?c= param so a refresh lands on the list
   // instead of re-opening the thread the user just backed out of.
@@ -676,6 +690,7 @@ export default function InboxPage() {
             conversations={conversations}
             onConversationsLoaded={handleConversationsLoaded}
             resyncToken={resyncToken}
+            onNewConversation={() => setNewConversationOpen(true)}
           />
         </div>
 
@@ -722,6 +737,12 @@ export default function InboxPage() {
           </div>
         )}
       </div>
+
+      <NewConversationDialog
+        open={newConversationOpen}
+        onOpenChange={setNewConversationOpen}
+        onSent={handleNewConversationSent}
+      />
     </div>
   );
 }

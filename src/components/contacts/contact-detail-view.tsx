@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { formatCurrency } from '@/lib/currency';
@@ -61,6 +62,7 @@ export function ContactDetailView({
   onUpdated,
 }: ContactDetailViewProps) {
   const supabase = createClient();
+  const router = useRouter();
   const { accountId, defaultCurrency } = useAuth();
 
   const [contact, setContact] = useState<Contact | null>(null);
@@ -390,7 +392,14 @@ export function ContactDetailView({
         return;
       }
 
-      toast.success(`Template "${template.name}" sent`);
+      toast.success(`Template "${template.name}" sent`, {
+        action: payload.conversation_id
+          ? {
+              label: 'View conversation',
+              onClick: () => router.push(`/inbox?c=${payload.conversation_id}`),
+            }
+          : undefined,
+      });
     } catch (err) {
       const reason = err instanceof Error ? err.message : 'network error';
       toast.error(`Failed to send template: ${reason}`);

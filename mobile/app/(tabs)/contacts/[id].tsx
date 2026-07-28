@@ -8,13 +8,15 @@ import {
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
-import { useLocalSearchParams, useNavigation } from 'expo-router';
-import { supabase } from '../../../lib/supabase';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { supabase, apiFetch } from '../../../lib/supabase';
 import { useAuth } from '../../../hooks/use-auth';
 import { useAppTheme } from '../../../hooks/use-theme';
 import { scaleFontSizes, type Palette } from '../../../lib/theme';
 import { loadTags, loadLifecycleStages } from '../../../lib/contacts/queries';
-import type { Contact, Tag, LifecycleStage, ContactNote } from '../../../lib/types';
+import { TemplatePicker, renderBodyPreview } from '../../../components/TemplatePicker';
+import type { Contact, Tag, LifecycleStage, ContactNote, MessageTemplate } from '../../../lib/types';
 
 function timeAgo(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -29,6 +31,7 @@ function timeAgo(iso: string): string {
 export default function ContactDetailScreen() {
   const { id: contactId } = useLocalSearchParams<{ id: string }>();
   const navigation = useNavigation();
+  const router = useRouter();
   const { user, accountId } = useAuth();
   const { colors, fontScale } = useAppTheme();
   const styles = useMemo(() => scaleFontSizes(makeStyles(colors), fontScale), [colors, fontScale]);
@@ -49,6 +52,13 @@ export default function ContactDetailScreen() {
   const [notes, setNotes] = useState<ContactNote[]>([]);
   const [newNote, setNewNote] = useState('');
   const [addingNote, setAddingNote] = useState(false);
+
+  // Business-initiated send — lets the agent message this contact via an
+  // approved template even if they've never texted the account first.
+  // Mirrors the web contact-detail-view's "Send template" button; the
+  // send route find-or-creates the conversation from contact_id.
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [sendingTemplate, setSendingTemplate] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -112,6 +122,47 @@ export default function ContactDetailScreen() {
     }
   }
 
+  async function handleSendTemplate(template: MessageTemplate, values: { body: string[] }) {
+    setSendingTemplate(true);
+    setError(null);
+    try {
+      const res = await apiFetch('/api/whatsapp/send', {
+        method: 'POST',
+        body: JSON.stringify({
+          contact_id: contactId,
+          message_type: 'template',
+          template_name: template.name,
+          template_language: template.language,
+          template_message_params: { body: values.body },
+          template_params: values.body,
+          content_text: renderBodyPreview(template.body_text, values.body),
+        }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // No "is this number on WhatsApp" check exists on the Cloud API —
+        // an invalid/unreachable number only surfaces here, as Meta's
+        // rejection of the actual send.
+        setError(payload.error || 'Failed to send — this number may not be on WhatsApp');
+        return;
+      }
+      if (payload.conversation_id) {
+        router.push({
+          pathname: '/inbox/[id]',
+          params: {
+            id: payload.conversation_id,
+            name: name.trim() || phone.trim(),
+            phone: phone.trim(),
+          },
+        });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send template');
+    } finally {
+      setSendingTemplate(false);
+    }
+  }
+
   async function toggleTag(tagId: string) {
     const isSelected = selectedTagIds.includes(tagId);
     setSelectedTagIds((prev) => (isSelected ? prev.filter((id) => id !== tagId) : [...prev, tagId]));
@@ -165,12 +216,26 @@ export default function ContactDetailScreen() {
   }
 
   return (
+    <>
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {error && (
         <View style={styles.errorBox}>
           <Text style={styles.errorText}>{error}</Text>
         </View>
       )}
+
+      <Pressable
+        style={[styles.messageButton, sendingTemplate && { opacity: 0.6 }]}
+        onPress={() => setTemplatePickerOpen(true)}
+        disabled={sendingTemplate}
+      >
+        {sendingTemplate ? (
+          <ActivityIndicator color={colors.white} size="small" />
+        ) : (
+          <Ionicons name="logo-whatsapp" size={18} color={colors.white} />
+        )}
+        <Text style={styles.messageButtonText}>Message on WhatsApp</Text>
+      </Pressable>
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Details</Text>
@@ -262,6 +327,12 @@ export default function ContactDetailScreen() {
         )}
       </View>
     </ScrollView>
+    <TemplatePicker
+      visible={templatePickerOpen}
+      onClose={() => setTemplatePickerOpen(false)}
+      onSelect={handleSendTemplate}
+    />
+    </>
   );
 }
 
@@ -272,6 +343,16 @@ function makeStyles(colors: Palette) {
     center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
     errorBox: { backgroundColor: colors.dangerBg, borderRadius: 8, padding: 10 },
     errorText: { color: colors.dangerMuted, fontSize: 12 },
+    messageButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      backgroundColor: colors.primary,
+      borderRadius: 10,
+      paddingVertical: 12,
+    },
+    messageButtonText: { color: colors.white, fontSize: 14, fontWeight: '600' },
     card: {
       backgroundColor: colors.surface,
       borderRadius: 12,

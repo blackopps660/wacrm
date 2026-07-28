@@ -10,7 +10,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import type { Conversation, ConversationStatus, LifecycleStage, Tag } from "@/types";
-import { Search, ChevronDown, X, Bot, User, CircleDashed } from "lucide-react";
+import { Search, ChevronDown, X, Bot, User, CircleDashed, SquarePen } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Input } from "@/components/ui/input";
 import {
@@ -56,6 +56,9 @@ interface ConversationListProps {
    * older loaded pages don't need to be re-verified.
    */
   resyncToken?: number;
+  /** Opens the compose flow for a business-initiated conversation. Omit
+   *  to hide the button (kept optional so existing callers don't break). */
+  onNewConversation?: () => void;
 }
 
 const STATUS_COLORS: Record<ConversationStatus, string> = {
@@ -105,6 +108,7 @@ export function ConversationList({
   conversations,
   onConversationsLoaded,
   resyncToken = 0,
+  onNewConversation,
 }: ConversationListProps) {
   const { user, accountId } = useAuth();
   const [search, setSearch] = useState("");
@@ -743,14 +747,28 @@ export function ConversationList({
 
       {/* Search + Filter */}
       <div className="space-y-2 border-b border-border p-3">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={handleSearchChange}
-            placeholder="Search conversations..."
-            className="border-border bg-muted pl-9 text-sm text-foreground placeholder-muted-foreground focus:border-primary/50"
-          />
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={handleSearchChange}
+              placeholder="Search conversations..."
+              className="border-border bg-muted pl-9 text-sm text-foreground placeholder-muted-foreground focus:border-primary/50"
+            />
+          </div>
+          {onNewConversation && (
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              onClick={onNewConversation}
+              title="New message"
+              className="shrink-0 border-border text-muted-foreground hover:text-foreground"
+            >
+              <SquarePen className="h-4 w-4" />
+            </Button>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-1">

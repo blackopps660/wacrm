@@ -209,6 +209,11 @@ export async function POST(request: Request) {
         success: true,
         message_id: result.messageId,
         whatsapp_message_id: result.whatsappMessageId,
+        // The contact_id path find-or-creates a conversation the caller
+        // didn't already know the id of (e.g. a fresh "message this
+        // contact" send) — return it so the UI can jump straight there
+        // instead of re-querying.
+        conversation_id: conversationId,
       })
     } catch (err) {
       if (err instanceof SendMessageError) {
