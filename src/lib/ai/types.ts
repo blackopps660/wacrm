@@ -68,6 +68,9 @@ export interface AiConfig {
   /** Cap on rescue nudges per conversation, reset whenever a human
    *  agent actually replies. */
   rescueMaxPerConversation: number
+  /** Migration 060 — scan human agent replies for knowledge the bot
+   *  doesn't have yet and stage it as a reviewable suggestion. */
+  learningEnabled: boolean
 }
 
 /** Provider-agnostic tool schema, translated to each provider's own

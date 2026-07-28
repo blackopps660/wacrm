@@ -35,6 +35,7 @@ import {
 } from '@/components/ui/select';
 import { SettingsPanelHead } from './settings-panel-head';
 import { AiKnowledgeCard } from './ai-knowledge';
+import { AiKnowledgeSuggestionsCard } from './ai-knowledge-suggestions';
 import { AI_PROVIDER_DEFAULT_MODEL } from '@/lib/ai/defaults';
 import type { AiActionSetting, AiActionsConfig, AiProvider } from '@/lib/ai/types';
 
@@ -120,6 +121,7 @@ export function AiConfig({ agentId, isDefault, onSaved, onDeleted }: AiConfigPro
   const [rescueReplyEnabled, setRescueReplyEnabled] = useState(false);
   const [rescueAfterHours, setRescueAfterHours] = useState(20);
   const [rescueMaxPerConversation, setRescueMaxPerConversation] = useState(2);
+  const [learningEnabled, setLearningEnabled] = useState(false);
 
   const fetchConfig = useCallback(async (id: string) => {
     setLoading(true);
@@ -157,6 +159,7 @@ export function AiConfig({ agentId, isDefault, onSaved, onDeleted }: AiConfigPro
           ? data.rescue_max_per_conversation
           : 2,
       );
+      setLearningEnabled(Boolean(data.learning_enabled));
       setHasStoredKey(Boolean(data.has_key));
       setApiKey(data.has_key ? MASKED_KEY : '');
       setKeyEdited(false);
@@ -195,6 +198,7 @@ export function AiConfig({ agentId, isDefault, onSaved, onDeleted }: AiConfigPro
       setRescueReplyEnabled(false);
       setRescueAfterHours(20);
       setRescueMaxPerConversation(2);
+      setLearningEnabled(false);
       setLoading(false);
     }
   }, [agentId, fetchConfig]);
@@ -231,6 +235,7 @@ export function AiConfig({ agentId, isDefault, onSaved, onDeleted }: AiConfigPro
     rescue_reply_enabled: rescueReplyEnabled,
     rescue_after_hours: rescueAfterHours,
     rescue_max_per_conversation: rescueMaxPerConversation,
+    learning_enabled: learningEnabled,
   });
 
   const handleTest = async () => {
@@ -740,6 +745,38 @@ export function AiConfig({ agentId, isDefault, onSaved, onDeleted }: AiConfigPro
           </CardContent>
         </Card>
 
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Sparkles className="h-4 w-4 text-primary" /> Learn from your agents
+            </CardTitle>
+            <CardDescription>
+              Scan your human agents&apos; WhatsApp replies for information the
+              knowledge base doesn&apos;t have yet. Nothing is added automatically —
+              findings show up below the knowledge base for you to approve or
+              reject first.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  Enable self-learning
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Runs on a schedule in the background — new agent replies are
+                  picked up automatically, nothing to trigger manually.
+                </p>
+              </div>
+              <Switch
+                checked={learningEnabled}
+                onCheckedChange={setLearningEnabled}
+                disabled={disabled || !isActive}
+              />
+            </div>
+          </CardContent>
+        </Card>
+
         <AiKnowledgeCard
           accountId={accountId}
           canEdit={canEdit}
@@ -749,6 +786,8 @@ export function AiConfig({ agentId, isDefault, onSaved, onDeleted }: AiConfigPro
               : hasStoredEmbeddingsKey
           }
         />
+
+        <AiKnowledgeSuggestionsCard accountId={accountId} canEdit={canEdit} />
 
         <div className="flex items-center justify-between">
           {agentId ? (

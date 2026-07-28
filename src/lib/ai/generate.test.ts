@@ -18,6 +18,7 @@ function config(overrides: Partial<AiConfig> = {}): AiConfig {
     rescueReplyEnabled: false,
     rescueAfterHours: 20,
     rescueMaxPerConversation: 2,
+    learningEnabled: false,
     actions: {
       updateTags: { enabled: false, guidelines: null },
       updateContactFields: { enabled: false, guidelines: null },

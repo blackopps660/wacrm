@@ -90,6 +90,7 @@ export async function POST(request: Request) {
       const n = Number(body.rescue_max_per_conversation)
       rescueMaxPerConversation = Number.isFinite(n) ? Math.max(1, Math.floor(n)) : 2
     }
+    const learningEnabled = body.learning_enabled === true
 
     const rawEmbeddingsKey =
       typeof body.embeddings_api_key === 'string' ? body.embeddings_api_key.trim() : ''
@@ -111,6 +112,7 @@ export async function POST(request: Request) {
         rescueReplyEnabled,
         rescueAfterHours,
         rescueMaxPerConversation,
+        learningEnabled,
       })
     } catch (err) {
       if (err instanceof AiError) {
@@ -154,6 +156,7 @@ export async function POST(request: Request) {
         rescue_reply_enabled: rescueReplyEnabled,
         rescue_after_hours: rescueAfterHours,
         rescue_max_per_conversation: rescueMaxPerConversation,
+        learning_enabled: learningEnabled,
       })
       .select('id')
       .single()

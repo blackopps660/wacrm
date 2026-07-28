@@ -28,7 +28,7 @@ export async function GET(
     const { data, error } = await supabase
       .from('ai_configs')
       .select(
-        'name, provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, default_new_conversation_owner, actions, api_key, embeddings_api_key, rescue_reply_enabled, rescue_after_hours, rescue_max_per_conversation',
+        'name, provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, default_new_conversation_owner, actions, api_key, embeddings_api_key, rescue_reply_enabled, rescue_after_hours, rescue_max_per_conversation, learning_enabled',
       )
       .eq('id', id)
       .eq('account_id', accountId)
@@ -120,6 +120,7 @@ export async function PATCH(
       const n = Number(body.rescue_max_per_conversation)
       rescueMaxPerConversation = Number.isFinite(n) ? Math.max(1, Math.floor(n)) : 2
     }
+    const learningEnabled = body.learning_enabled === true
 
     const rawKey = typeof body.api_key === 'string' ? body.api_key.trim() : ''
     const rawEmbeddingsKey =
@@ -160,6 +161,7 @@ export async function PATCH(
           rescueReplyEnabled,
           rescueAfterHours,
           rescueMaxPerConversation,
+          learningEnabled,
         })
       } catch (err) {
         if (err instanceof AiError) {
@@ -199,6 +201,7 @@ export async function PATCH(
       rescue_reply_enabled: rescueReplyEnabled,
       rescue_after_hours: rescueAfterHours,
       rescue_max_per_conversation: rescueMaxPerConversation,
+      learning_enabled: learningEnabled,
     }
     if (rawEmbeddingsKey) {
       shared.embeddings_api_key = encrypt(rawEmbeddingsKey)
