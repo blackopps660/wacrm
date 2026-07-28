@@ -7,14 +7,20 @@ import { getCurrentAccount, toErrorResponse } from '@/lib/auth/account'
  * List the account's pending self-learning suggestions (any member) —
  * knowledge the self-learning cron (migration 060) found in a human
  * agent's replies but hasn't been approved into the live knowledge
- * base yet.
+ * base yet. Each row is either a brand-new document or, when
+ * `target_document_id` is set (migration 061), a proposed correction —
+ * the target's current title/content are embedded so the review UI
+ * can show "current vs proposed" before an admin approves it.
  */
 export async function GET() {
   try {
     const { supabase, accountId } = await getCurrentAccount()
     const { data, error } = await supabase
       .from('ai_knowledge_suggestions')
-      .select('id, title, content, conversation_id, created_at')
+      .select(
+        'id, title, content, conversation_id, created_at, target_document_id, ' +
+          'target_document:ai_knowledge_documents!target_document_id(title, content)',
+      )
       .eq('account_id', accountId)
       .eq('status', 'pending')
       .order('created_at', { ascending: false })

@@ -14,6 +14,18 @@ interface MatchRow {
   content: string
 }
 
+interface MatchDocRow {
+  document_id: string
+  title: string
+  content: string
+}
+
+export interface KnowledgeCandidate {
+  documentId: string
+  title: string
+  content: string
+}
+
 /**
  * (Re)build the chunks for one document. Deletes the document's
  * existing chunks, re-chunks the content, and — when the account has an
@@ -142,6 +154,93 @@ export async function retrieveKnowledge(
       }
     } catch (err) {
       console.error('[ai knowledge] lexical retrieval failed:', err)
+    }
+  }
+
+  return Array.from(picked.values()).slice(0, k)
+}
+
+/**
+ * Document-aware sibling of `retrieveKnowledge` — same hybrid semantic
+ * + lexical strategy, but keyed and deduped by owning DOCUMENT rather
+ * than chunk, and returns the document id + title alongside its
+ * content. Used by the self-learning cron so it can offer existing
+ * documents as correction targets (and the review UI can show the
+ * admin exactly what would be replaced) instead of only ever proposing
+ * brand-new entries.
+ */
+export async function retrieveKnowledgeCandidates(
+  db: SupabaseClient,
+  accountId: string,
+  config: Pick<AiConfig, 'embeddingsApiKey'>,
+  queryText: string,
+  k = 3,
+): Promise<KnowledgeCandidate[]> {
+  const query = queryText.trim()
+  if (!query || k <= 0) return []
+
+  try {
+    const { count, error } = await db
+      .from('ai_knowledge_chunks')
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', accountId)
+    if (error || !count) return []
+  } catch {
+    return []
+  }
+
+  const picked = new Map<string, KnowledgeCandidate>() // documentId → candidate
+
+  if (config.embeddingsApiKey) {
+    try {
+      const [queryEmbedding] = await embedTexts(config.embeddingsApiKey, [query])
+      if (queryEmbedding) {
+        const { data, error } = await db.rpc('match_ai_knowledge_semantic_docs', {
+          p_account_id: accountId,
+          p_query_embedding: toVectorLiteral(queryEmbedding),
+          p_match_count: k,
+        })
+        if (!error && Array.isArray(data)) {
+          for (const row of data as MatchDocRow[]) {
+            if (!picked.has(row.document_id)) {
+              picked.set(row.document_id, {
+                documentId: row.document_id,
+                title: row.title,
+                content: row.content,
+              })
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error(
+        '[ai knowledge] semantic doc retrieval failed, falling back to FTS:',
+        err,
+      )
+    }
+  }
+
+  if (picked.size < k) {
+    try {
+      const { data, error } = await db.rpc('match_ai_knowledge_fts_docs', {
+        p_account_id: accountId,
+        p_query: query,
+        p_match_count: k,
+      })
+      if (!error && Array.isArray(data)) {
+        for (const row of data as MatchDocRow[]) {
+          if (picked.size >= k) break
+          if (!picked.has(row.document_id)) {
+            picked.set(row.document_id, {
+              documentId: row.document_id,
+              title: row.title,
+              content: row.content,
+            })
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[ai knowledge] lexical doc retrieval failed:', err)
     }
   }
 

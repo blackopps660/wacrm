@@ -8,13 +8,17 @@ import { AiError } from '@/lib/ai/types'
 /**
  * PATCH /api/ai/knowledge/suggestions/[id]  (admin+)
  *
- * Approve or reject a self-learning suggestion. Approving copies it
- * into `ai_knowledge_documents` via the exact same insert + chunk/embed
- * path as manually adding a document (`POST /api/ai/knowledge`) — a
- * suggestion becomes indistinguishable from hand-written knowledge
- * once accepted. Rejecting just marks it so; the row is kept (not
- * deleted) as an audit trail of what the bot proposed and why it was
- * turned down.
+ * Approve or reject a self-learning suggestion. Approving a "new"
+ * suggestion (no `target_document_id`) creates a document via the
+ * exact same insert + chunk/embed path as manually adding one
+ * (`POST /api/ai/knowledge`). Approving a "correction" (migration 061
+ * — `target_document_id` set) instead REPLACES that existing
+ * document's content in place and re-indexes it, so the fix lands on
+ * the same document id every other reference to it still points at.
+ * Either way a suggestion becomes indistinguishable from hand-written
+ * knowledge once accepted. Rejecting just marks it so; the row is kept
+ * (not deleted) as an audit trail of what the bot proposed and why it
+ * was turned down.
  */
 export async function PATCH(
   request: Request,
@@ -38,7 +42,7 @@ export async function PATCH(
 
     const { data: suggestion, error: fetchErr } = await supabase
       .from('ai_knowledge_suggestions')
-      .select('id, title, content, status')
+      .select('id, title, content, status, target_document_id')
       .eq('id', id)
       .eq('account_id', accountId)
       .maybeSingle()
@@ -64,26 +68,54 @@ export async function PATCH(
       return NextResponse.json({ success: true })
     }
 
-    // Approve: create the live document, same path as the manual form.
-    const { data: doc, error: docErr } = await supabase
-      .from('ai_knowledge_documents')
-      .insert({
-        account_id: accountId,
-        created_by: userId,
-        title: suggestion.title,
-        content: suggestion.content,
-      })
-      .select('id')
-      .single()
-    if (docErr || !doc) {
-      console.error('[ai/knowledge/suggestions PATCH] doc insert error:', docErr)
-      return NextResponse.json({ error: 'Failed to save document' }, { status: 500 })
+    // Approve: either replace an existing document in place (correction)
+    // or create a new one — same downstream chunk/embed path either way.
+    let documentId: string
+    if (suggestion.target_document_id) {
+      const { data: updatedDoc, error: docUpdErr } = await supabase
+        .from('ai_knowledge_documents')
+        .update({
+          title: suggestion.title,
+          content: suggestion.content,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', suggestion.target_document_id)
+        .eq('account_id', accountId)
+        .select('id')
+        .maybeSingle()
+      if (docUpdErr || !updatedDoc) {
+        console.error(
+          '[ai/knowledge/suggestions PATCH] doc update error:',
+          docUpdErr,
+        )
+        return NextResponse.json(
+          { error: 'Failed to update the target document — it may have been deleted.' },
+          { status: 409 },
+        )
+      }
+      documentId = updatedDoc.id
+    } else {
+      const { data: doc, error: docErr } = await supabase
+        .from('ai_knowledge_documents')
+        .insert({
+          account_id: accountId,
+          created_by: userId,
+          title: suggestion.title,
+          content: suggestion.content,
+        })
+        .select('id')
+        .single()
+      if (docErr || !doc) {
+        console.error('[ai/knowledge/suggestions PATCH] doc insert error:', docErr)
+        return NextResponse.json({ error: 'Failed to save document' }, { status: 500 })
+      }
+      documentId = doc.id
     }
 
     let warning: string | undefined
     const { key: embeddingsApiKey, corrupt } = await loadEmbeddingsKey(supabase, accountId)
     try {
-      await ingestDocument(supabase, accountId, { embeddingsApiKey }, doc.id, suggestion.content)
+      await ingestDocument(supabase, accountId, { embeddingsApiKey }, documentId, suggestion.content)
       if (corrupt) {
         warning =
           'Saved with keyword search only — your embeddings key could not be decrypted (check ENCRYPTION_KEY, then re-enter the key).'
@@ -100,7 +132,7 @@ export async function PATCH(
         status: 'approved',
         reviewed_at: new Date().toISOString(),
         reviewed_by: userId,
-        knowledge_document_id: doc.id,
+        knowledge_document_id: documentId,
       })
       .eq('id', id)
     if (updErr) {
@@ -108,7 +140,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'Failed to update suggestion' }, { status: 500 })
     }
 
-    return NextResponse.json({ success: true, document_id: doc.id, warning })
+    return NextResponse.json({ success: true, document_id: documentId, warning })
   } catch (err) {
     return toErrorResponse(err)
   }

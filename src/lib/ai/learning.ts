@@ -1,6 +1,6 @@
 import { supabaseAdmin } from './admin-client'
 import { loadDefaultAiConfig } from './config'
-import { retrieveKnowledge } from './knowledge'
+import { retrieveKnowledgeCandidates, type KnowledgeCandidate } from './knowledge'
 import { generateReply } from './generate'
 import type { ChatMessage } from './types'
 
@@ -14,10 +14,23 @@ export interface LearningCandidate {
 const NO_NEW_INFO = 'NO_NEW_INFO'
 
 const EXTRACTION_SYSTEM_PROMPT =
-  'You audit a human customer-support agent\'s WhatsApp reply to decide whether it teaches the business\'s AI assistant something reusable it does not already know — a process step, a policy, a fact, or how to phrase a common answer. ' +
-  `You are shown: the recent conversation leading up to the agent's reply, and excerpts already in the knowledge base (if any). If the agent's reply is small talk, specific to this one customer (their name, their order, a one-off apology), or already fully covered by the existing excerpts, respond with exactly ${NO_NEW_INFO} and nothing else. ` +
-  'Otherwise respond with ONLY a JSON object of the shape {"title": "short label", "content": "the reusable knowledge, written as a standalone fact/policy/answer a future agent or bot could use without seeing this conversation"} — no markdown fences, no extra text. ' +
+  'You audit a human customer-support agent\'s WhatsApp reply to decide whether it should change the business\'s AI assistant\'s knowledge base — either by teaching it something reusable it does not already know, or by CORRECTING an existing entry that the agent\'s reply contradicts (a changed price, an updated policy, a fact that turned out wrong). ' +
+  `You are shown: the recent conversation leading up to the agent's reply, and a numbered list of existing knowledge base documents (each with its id). If the agent's reply is small talk, specific to this one customer (their name, their order, a one-off apology), or already fully and correctly covered by an existing document, respond with exactly ${NO_NEW_INFO} and nothing else. ` +
+  'Otherwise respond with ONLY a JSON object — no markdown fences, no extra text — of one of these two shapes: ' +
+  '{"action": "new", "title": "short label", "content": "the reusable knowledge, standalone, usable without seeing this conversation"} for something genuinely new; or ' +
+  '{"action": "correct", "document_id": "<the exact id from the numbered list>", "title": "short label", "content": "the corrected, complete replacement text for that document"} when the agent\'s reply contradicts or updates one of the listed documents — "content" must be the FULL corrected document, not just the changed part. ' +
+  'Only use "correct" with a document_id that actually appears in the numbered list; never invent one. ' +
   'Write the content generally (not "as I told you above"), in whatever language the business/agent is using. Never invent facts beyond what the agent actually said.'
+
+function buildCandidateList(candidates: KnowledgeCandidate[]): string {
+  if (candidates.length === 0) return 'Existing knowledge base documents: (none yet)'
+  return (
+    'Existing knowledge base documents:\n' +
+    candidates
+      .map((c, i) => `[${i + 1}] id=${c.documentId} title="${c.title}"\n${c.content}`)
+      .join('\n\n')
+  )
+}
 
 /**
  * One self-learning pass over a single human agent reply (found by
@@ -27,6 +40,7 @@ const EXTRACTION_SYSTEM_PROMPT =
  * never throws, always marks the message processed in its `finally` so
  * a failure can't wedge the same message in an infinite retry loop).
  * Never writes to the live knowledge base directly — every finding
+ * (new document OR a correction to an existing one, migration 061)
  * lands in `ai_knowledge_suggestions` as `pending` for a human to
  * approve or reject from Settings.
  */
@@ -68,17 +82,15 @@ export async function processAgentMessage(
 
     if (!transcript.trim()) return false
 
-    // Ground the "is this already known" check in the same retrieval the
-    // bot itself uses, so a suggestion only surfaces for genuinely new
-    // ground, not something already answerable from the KB.
-    const existing = await retrieveKnowledge(db, accountId, config, contentText, 3)
+    // Full candidate documents (not just chunk excerpts) so the model
+    // can both judge "already covered" and, if it contradicts one,
+    // reference it by id as a correction target.
+    const candidates = await retrieveKnowledgeCandidates(db, accountId, config, contentText, 3)
 
     const userContent =
       `Conversation leading up to the agent's reply:\n${transcript}\n\n` +
-      (existing.length > 0
-        ? `Knowledge base excerpts already on file:\n${existing.map((k, i) => `[${i + 1}] ${k}`).join('\n\n')}\n\n`
-        : 'Knowledge base excerpts already on file: (none yet)\n\n') +
-      'Does the agent\'s reply above teach anything reusable not already covered?'
+      `${buildCandidateList(candidates)}\n\n` +
+      'Does the agent\'s reply above teach something new, correct one of the listed documents, or add nothing?'
 
     const messages: ChatMessage[] = [{ role: 'user', content: userContent }]
 
@@ -93,7 +105,12 @@ export async function processAgentMessage(
       return false
     }
 
-    let parsed: { title?: unknown; content?: unknown } | null = null
+    let parsed: {
+      action?: unknown
+      document_id?: unknown
+      title?: unknown
+      content?: unknown
+    } | null = null
     try {
       // Models occasionally wrap JSON in a code fence despite the
       // instruction not to — strip one if present before parsing.
@@ -110,10 +127,19 @@ export async function processAgentMessage(
     const content = typeof parsed?.content === 'string' ? parsed.content.trim() : ''
     if (!title || !content) return false
 
+    // "correct" only counts if the model referenced an id we actually
+    // showed it — never trust a model-invented document id.
+    let targetDocumentId: string | null = null
+    if (parsed?.action === 'correct' && typeof parsed.document_id === 'string') {
+      const match = candidates.find((c) => c.documentId === parsed!.document_id)
+      if (match) targetDocumentId = match.documentId
+    }
+
     const { error: insertErr } = await db.from('ai_knowledge_suggestions').insert({
       account_id: accountId,
       conversation_id: conversationId,
       source_message_id: messageId,
+      target_document_id: targetDocumentId,
       title,
       content,
     })
