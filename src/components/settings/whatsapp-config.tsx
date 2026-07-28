@@ -54,6 +54,14 @@ export function WhatsAppConfig() {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('unknown');
   const [resetReason, setResetReason] = useState<ResetReason>(null);
   const [statusMessage, setStatusMessage] = useState<string>('');
+  // The connected number — GET /api/whatsapp/config already returns this
+  // on every health check, it just wasn't kept around to render (it only
+  // ever flashed through a toast). Persisted here so the Connection
+  // Status card can show it, same as the mobile WhatsApp status screen.
+  const [phoneInfo, setPhoneInfo] = useState<{
+    display_phone_number?: string;
+    verified_name?: string;
+  } | null>(null);
   // Guards against re-hydrating the form when the load effect below
   // re-runs for reasons unrelated to actually switching accounts —
   // e.g. Supabase's onAuthStateChange fires a token refresh (new
@@ -145,19 +153,23 @@ export function WhatsAppConfig() {
             setConnectionStatus('connected');
             setResetReason(null);
             setStatusMessage('');
+            setPhoneInfo(payload.phone_info ?? null);
           } else {
             setConnectionStatus('disconnected');
             setResetReason(payload.needs_reset ? 'token_corrupted' : payload.reason === 'meta_api_error' ? 'meta_api_error' : null);
             setStatusMessage(payload.message || '');
+            setPhoneInfo(null);
           }
         } catch (err) {
           console.error('Health check failed:', err);
           setConnectionStatus('disconnected');
+          setPhoneInfo(null);
         }
       } else {
         setConnectionStatus('disconnected');
         setResetReason(null);
         setStatusMessage('');
+        setPhoneInfo(null);
       }
     } catch (err) {
       console.error('fetchConfig error:', err);
@@ -318,6 +330,7 @@ export function WhatsAppConfig() {
         setConnectionStatus('connected');
         setResetReason(null);
         setStatusMessage('');
+        setPhoneInfo(payload.phone_info ?? null);
         toast.success(
           payload.phone_info?.verified_name
             ? `Connected to ${payload.phone_info.verified_name}`
@@ -327,6 +340,7 @@ export function WhatsAppConfig() {
         setConnectionStatus('disconnected');
         setResetReason(payload.needs_reset ? 'token_corrupted' : payload.reason === 'meta_api_error' ? 'meta_api_error' : null);
         setStatusMessage(payload.message || '');
+        setPhoneInfo(null);
         toast.error(payload.message || 'API connection failed');
       }
     } catch (err) {
@@ -508,6 +522,18 @@ export function WhatsAppConfig() {
               : statusMessage ||
                 'Configure your Meta API credentials below to connect your WhatsApp Business account.'}
           </AlertDescription>
+          {connectionStatus === 'connected' && phoneInfo && (
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+              {phoneInfo.verified_name && (
+                <span className="font-medium text-foreground">{phoneInfo.verified_name}</span>
+              )}
+              {phoneInfo.display_phone_number && (
+                <span className="font-mono text-muted-foreground">
+                  {phoneInfo.display_phone_number}
+                </span>
+              )}
+            </div>
+          )}
         </Alert>
 
         {/* Registration Status — the "is it actually live?" check.

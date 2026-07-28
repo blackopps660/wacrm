@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, apiFetch, API_BASE_URL } from '../../../lib/supabase';
 import { useAppTheme } from '../../../hooks/use-theme';
@@ -27,6 +28,7 @@ interface ConfigResponse {
 }
 
 export default function WhatsAppStatusScreen() {
+  const router = useRouter();
   const { colors, fontScale } = useAppTheme();
   const styles = useMemo(() => scaleFontSizes(makeStyles(colors), fontScale), [colors, fontScale]);
   const [data, setData] = useState<ConfigResponse | null>(null);
@@ -130,6 +132,17 @@ export default function WhatsAppStatusScreen() {
         </Pressable>
       )}
 
+      {data?.connected && (
+        <Pressable
+          style={({ pressed }) => [styles.profileLinkButton, pressed && { opacity: 0.85 }]}
+          onPress={() => router.push('/settings/business-profile')}
+        >
+          <Ionicons name="business-outline" size={18} color={colors.text} />
+          <Text style={styles.profileLinkText}>Business Profile (photo, about, links)</Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.textFaint} />
+        </Pressable>
+      )}
+
       <Text style={styles.note}>
         For advanced options (manual token entry, webhook config), use Settings → WhatsApp on the
         web app.
@@ -176,6 +189,18 @@ function makeStyles(colors: Palette) {
       paddingVertical: spacing.md + 2,
     },
     connectButtonText: { color: colors.white, fontWeight: '700', fontSize: 15 },
+    profileLinkButton: {
+      marginTop: spacing.lg,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      borderWidth: 1,
+      borderColor: colors.borderStrong,
+      borderRadius: radius.sm,
+      paddingVertical: spacing.md,
+      paddingHorizontal: spacing.md,
+    },
+    profileLinkText: { flex: 1, color: colors.text, fontWeight: '600', fontSize: 14 },
     note: { color: colors.textFaint, fontSize: 12, marginTop: spacing.lg, lineHeight: 18 },
     refreshButton: {
       marginTop: spacing.lg,

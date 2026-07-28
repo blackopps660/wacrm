@@ -19,6 +19,7 @@ export default function SettingsLayout() {
       <Stack.Screen name="agents" options={{ title: 'AI Agents' }} />
       <Stack.Screen name="agent-edit" options={{ title: 'Agent' }} />
       <Stack.Screen name="whatsapp" options={{ title: 'WhatsApp Status' }} />
+      <Stack.Screen name="business-profile" options={{ title: 'Business Profile' }} />
       <Stack.Screen name="appearance" options={{ title: 'Appearance' }} />
     </Stack>
   );
