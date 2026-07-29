@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet, ActivityIndicator, Image } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { File } from 'expo-file-system';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../../hooks/use-auth';
 import { useAppTheme } from '../../../hooks/use-theme';
@@ -74,14 +75,13 @@ export default function ProfileScreen() {
         setUploading(true);
         const ext = pendingUri.split('.').pop()?.toLowerCase() || 'jpg';
         const path = `${user.id}/avatar-${Date.now()}.${ext}`;
-        const response = await fetch(pendingUri);
-        const blob = await response.blob();
+        const arrayBuffer = await new File(pendingUri).arrayBuffer();
         const { error: uploadError } = await supabase.storage
           .from('avatars')
-          .upload(path, blob, {
+          .upload(path, arrayBuffer, {
             cacheControl: '3600',
             upsert: true,
-            contentType: blob.type || `image/${ext}`,
+            contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}`,
           });
         if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
         const {

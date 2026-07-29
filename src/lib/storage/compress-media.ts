@@ -114,6 +114,13 @@ export async function compressImage(
 const VIDEO_MIME_EXT: Record<string, string> = {
   'video/mp4': 'mp4',
   'video/3gpp': '3gp',
+  // iPhone camera videos are commonly QuickTime (.mov) — ffmpeg reads
+  // the container natively (no licensing concern, unlike HEIC below;
+  // decode-only H.264/HEVC support is standard in ffmpeg builds), so
+  // routing it through here transcodes it to the MP4 the chat-media
+  // bucket's allow-list and Meta's API both require, instead of the
+  // upload being silently rejected further down the pipeline.
+  'video/quicktime': 'mov',
 }
 
 /**
@@ -122,13 +129,20 @@ const VIDEO_MIME_EXT: Record<string, string> = {
  * is universally what WhatsApp/browsers expect and 3GP inputs are rare
  * and low quality to begin with. Falls back to the original buffer on
  * any error, unsupported mime type, an already-small file, or timeout.
+ *
+ * Note: unlike the other entries, `video/quicktime` (.mov) MUST go
+ * through this path even when the file is small — skipping straight
+ * to "return as-is" below `MIN_VIDEO_BYTES_TO_COMPRESS` would leave
+ * its original (unsupported) mime type in place and it would still
+ * get rejected downstream.
  */
 export async function compressVideo(
   buffer: Buffer,
   mimeType: string,
 ): Promise<CompressedMedia> {
   const ext = VIDEO_MIME_EXT[mimeType]
-  if (!ext || buffer.byteLength < MIN_VIDEO_BYTES_TO_COMPRESS || !ffmpegPath) {
+  const mustTranscode = mimeType === 'video/quicktime'
+  if (!ext || (!mustTranscode && buffer.byteLength < MIN_VIDEO_BYTES_TO_COMPRESS) || !ffmpegPath) {
     return { buffer, mimeType }
   }
 

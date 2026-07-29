@@ -73,10 +73,10 @@ interface SidebarProps {
 
 export function Sidebar({ open = false, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const { profile, signOut } = useAuth();
-  const totalUnread = useTotalUnread();
+  const { user, profile, signOut } = useAuth();
+  const totalUnread = useTotalUnread(profile?.account_id ?? null);
   const waStatus = useWhatsappStatus();
-  const unreadNotifications = useUnreadNotifications();
+  const unreadNotifications = useUnreadNotifications(user?.id ?? null);
 
   // Close the drawer when route changes — users opened it to navigate,
   // so once they pick a destination the drawer should get out of the way.

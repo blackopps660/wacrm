@@ -11,8 +11,15 @@ import type { Conversation } from "@/types";
  *
  * Lives on its own realtime channel (distinct from the inbox page's
  * "inbox-realtime") so both can coexist without sharing state.
+ *
+ * Scoped to `accountId` (both the initial select and the realtime
+ * filter) — this hook is mounted on every dashboard route via the
+ * sidebar, so an unfiltered subscription here means every page in the
+ * app re-processes every conversation change for every account on the
+ * instance. Same anti-pattern already diagnosed and fixed in
+ * `use-realtime.ts`; see that file's comment for the full story.
  */
-export function useTotalUnread(): number {
+export function useTotalUnread(accountId: string | null): number {
   const [total, setTotal] = useState(0);
 
   // Keep a live local mirror of {id: unread_count} so INSERT/UPDATE/DELETE
@@ -20,15 +27,16 @@ export function useTotalUnread(): number {
   const countsRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
+    if (!accountId) return;
+
     const supabase = createClient();
     let cancelled = false;
 
-    // Initial load. RLS scopes this to the signed-in user automatically —
-    // no explicit user_id filter needed here.
     (async () => {
       const { data, error } = await supabase
         .from("conversations")
-        .select("id, unread_count");
+        .select("id, unread_count")
+        .eq("account_id", accountId);
       if (cancelled || error || !data) return;
 
       const map = new Map<string, number>();
@@ -46,7 +54,12 @@ export function useTotalUnread(): number {
       .channel("total-unread-realtime")
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "conversations" },
+        {
+          event: "*",
+          schema: "public",
+          table: "conversations",
+          filter: `account_id=eq.${accountId}`,
+        },
         (payload) => {
           const map = countsRef.current;
           if (payload.eventType === "DELETE") {
@@ -68,7 +81,7 @@ export function useTotalUnread(): number {
       cancelled = true;
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [accountId]);
 
   return total;
 }

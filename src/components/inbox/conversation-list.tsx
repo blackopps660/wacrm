@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
   CONVERSATION_SELECT,
@@ -1038,7 +1038,13 @@ interface ConversationItemProps {
   onSelect: (conversation: Conversation) => void;
 }
 
-function ConversationItem({
+// Memoized — the parent replaces the whole `conversations` array on
+// every realtime event (a new message, a status flip, an unread
+// reset elsewhere in the list), which would otherwise re-render every
+// visible row instead of just the one that actually changed. See the
+// perf audit that flagged this alongside the unfiltered-subscription
+// fix in use-total-unread.ts.
+const ConversationItem = memo(function ConversationItem({
   conversation,
   isActive,
   onSelect,
@@ -1141,4 +1147,4 @@ function ConversationItem({
       </div>
     </button>
   );
-}
+});

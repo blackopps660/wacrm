@@ -39,6 +39,25 @@ function isCompressibleKind(value: unknown): value is CompressibleKind {
   return typeof value === 'string' && (COMPRESSIBLE_KINDS as readonly string[]).includes(value)
 }
 
+// Mirrors the chat-media bucket's `allowed_mime_types` (migration 023)
+// for the two kinds this route handles — checked BEFORE the Storage
+// call so an unsupported format (most commonly iPhone HEIC photos,
+// which sharp's prebuilt binary can't decode — confirmed via
+// `sharp.format.heif`, which only lists `.avif`) gets a clear,
+// actionable message instead of Storage's generic rejection surfacing
+// as an opaque "Upload failed" with no indication of why.
+const SUPPORTED_MIME_BY_KIND: Record<CompressibleKind, string[]> = {
+  image: ['image/png', 'image/jpeg', 'image/webp'],
+  video: ['video/mp4', 'video/3gpp'],
+}
+
+const UNSUPPORTED_FORMAT_HINT: Record<CompressibleKind, string> = {
+  image:
+    "This image format isn't supported (likely HEIC from an iPhone). On iPhone, go to Settings > Camera > Formats > Most Compatible, or share it as a screenshot instead.",
+  video:
+    "This video format isn't supported. Please try a different video, or re-export it as MP4.",
+}
+
 export async function POST(request: Request) {
   try {
     const { supabase, bearerToken } = await createClientForRequest(request)
@@ -99,6 +118,10 @@ export async function POST(request: Request) {
       kind === 'image'
         ? await compressImage(inputBuffer, mimeType)
         : await compressVideo(inputBuffer, mimeType)
+
+    if (!SUPPORTED_MIME_BY_KIND[kind].includes(compressed.mimeType)) {
+      return NextResponse.json({ error: UNSUPPORTED_FORMAT_HINT[kind] }, { status: 400 })
+    }
 
     const path = buildMediaPath(accountId, file.name)
     const { error: uploadErr } = await supabase.storage

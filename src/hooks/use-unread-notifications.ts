@@ -9,13 +9,18 @@ import type { Notification } from "@/types";
  * sidebar to surface a badge on the Notifications nav entry.
  *
  * RLS on `notifications` already scopes every read to `auth.uid() =
- * user_id`, so no explicit filter is needed here — same pattern as
+ * user_id`, so the initial select doesn't strictly need a filter — but
+ * the realtime subscription is still scoped explicitly by `userId` so
+ * this client isn't asked to evaluate/discard every notification
+ * change for every user on the instance. Same pattern as
  * `useTotalUnread` for conversations.
  */
-export function useUnreadNotifications(): number {
+export function useUnreadNotifications(userId: string | null): number {
   const [count, setCount] = useState(0);
 
   useEffect(() => {
+    if (!userId) return;
+
     const supabase = createClient();
     let cancelled = false;
 
@@ -34,7 +39,12 @@ export function useUnreadNotifications(): number {
       .channel("notifications-unread-count")
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "notifications" },
+        {
+          event: "*",
+          schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${userId}`,
+        },
         (payload) => {
           if (payload.eventType === "INSERT") {
             const row = payload.new as Notification;
@@ -57,7 +67,7 @@ export function useUnreadNotifications(): number {
       cancelled = true;
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [userId]);
 
   return count;
 }
