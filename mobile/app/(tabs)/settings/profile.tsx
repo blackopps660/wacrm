@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, ActivityIndicator, Image } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Image } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { File } from 'expo-file-system';
 import { supabase } from '../../../lib/supabase';
@@ -58,46 +58,36 @@ export default function ProfileScreen() {
   }
 
   async function handleSave() {
-    if (!user || !profile) return;
-    const trimmedName = fullName.trim();
-    if (!trimmedName) {
-      setError('Display name is required');
-      return;
-    }
+    if (!user || !profile || !pendingUri) return;
 
     setSaving(true);
     setError(null);
     setSuccess(false);
     try {
-      let nextAvatarUrl = profile.avatar_url ?? null;
-
-      if (pendingUri) {
-        setUploading(true);
-        const ext = pendingUri.split('.').pop()?.toLowerCase() || 'jpg';
-        const path = `${user.id}/avatar-${Date.now()}.${ext}`;
-        const arrayBuffer = await new File(pendingUri).arrayBuffer();
-        const { error: uploadError } = await supabase.storage
-          .from('avatars')
-          .upload(path, arrayBuffer, {
-            cacheControl: '3600',
-            upsert: true,
-            contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}`,
-          });
-        if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
-        const {
-          data: { publicUrl },
-        } = supabase.storage.from('avatars').getPublicUrl(path);
-        nextAvatarUrl = publicUrl;
-        setUploading(false);
-      }
+      setUploading(true);
+      const ext = pendingUri.split('.').pop()?.toLowerCase() || 'jpg';
+      const path = `${user.id}/avatar-${Date.now()}.${ext}`;
+      const arrayBuffer = await new File(pendingUri).arrayBuffer();
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(path, arrayBuffer, {
+          cacheControl: '3600',
+          upsert: true,
+          contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}`,
+        });
+      if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from('avatars').getPublicUrl(path);
+      setUploading(false);
 
       const { error: updateError } = await supabase
         .from('profiles')
-        .update({ full_name: trimmedName, avatar_url: nextAvatarUrl })
+        .update({ avatar_url: publicUrl })
         .eq('user_id', user.id);
       if (updateError) throw new Error(`Save failed: ${updateError.message}`);
 
-      setAvatarUrl(nextAvatarUrl);
+      setAvatarUrl(publicUrl);
       setPendingUri(null);
       await refreshProfile();
       setSuccess(true);
@@ -141,21 +131,16 @@ export default function ProfileScreen() {
       </View>
 
       <Text style={styles.label}>Display name</Text>
-      <TextInput
-        style={styles.input}
-        value={fullName}
-        onChangeText={setFullName}
-        placeholder="Your name"
-        placeholderTextColor={colors.textFaint}
-      />
+      <Text style={styles.readonlyValue}>{fullName || '—'}</Text>
+      <Text style={styles.hint}>Only the workspace owner can change your display name.</Text>
 
       <Text style={styles.label}>Email</Text>
       <Text style={styles.readonlyValue}>{profile?.email ?? '—'}</Text>
 
       <Pressable
-        style={[styles.saveButton, (saving || !fullName.trim()) && { opacity: 0.5 }]}
+        style={[styles.saveButton, (saving || !pendingUri) && { opacity: 0.5 }]}
         onPress={handleSave}
-        disabled={saving || !fullName.trim()}
+        disabled={saving || !pendingUri}
       >
         {saving ? (
           <ActivityIndicator color={colors.white} size="small" />
@@ -194,15 +179,8 @@ function makeStyles(colors: Palette) {
     },
     changePhotoText: { color: colors.textSecondary, fontSize: 13, fontWeight: '500' },
     label: { color: colors.textMuted, fontSize: 12, marginTop: 12 },
-    input: {
-      backgroundColor: colors.surfaceRaised,
-      borderRadius: 8,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      color: colors.text,
-      marginTop: 4,
-    },
     readonlyValue: { color: colors.textFaint, fontSize: 15, marginTop: 4 },
+    hint: { color: colors.textFaint, fontSize: 11, marginTop: 4 },
     saveButton: {
       marginTop: 24,
       backgroundColor: colors.primary,

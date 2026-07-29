@@ -99,11 +99,6 @@ export function ProfileForm() {
     e.preventDefault();
     if (!user || !profile) return;
 
-    const trimmedName = fullName.trim();
-    if (!trimmedName) {
-      toast.error('Display name is required');
-      return;
-    }
     const trimmedEmail = email.trim();
     if (!EMAIL_RE.test(trimmedEmail)) {
       toast.error('Enter a valid email address');
@@ -137,11 +132,11 @@ export function ProfileForm() {
         nextAvatarUrl = null;
       }
 
-      // Persist name + avatar to profiles.
+      // Persist avatar to profiles. Display name is owner-managed, not
+      // editable here — see migration 062.
       const { error: updateError } = await supabase
         .from('profiles')
         .update({
-          full_name: trimmedName,
           avatar_url: nextAvatarUrl,
         })
         .eq('user_id', user.id);
@@ -191,8 +186,7 @@ export function ProfileForm() {
 
   const dirty =
     !!profile &&
-    (fullName.trim() !== (profile.full_name ?? '') ||
-      email.trim().toLowerCase() !== (profile.email ?? '').toLowerCase() ||
+    (email.trim().toLowerCase() !== (profile.email ?? '').toLowerCase() ||
       pendingAvatar !== null ||
       removeAvatar);
 
@@ -259,20 +253,15 @@ export function ProfileForm() {
             </div>
           </div>
 
-          {/* Name */}
+          {/* Name — owner-managed, read-only here */}
           <div className="space-y-2">
-            <Label htmlFor="profile-full-name" className="text-foreground">
-              Display name
-            </Label>
-            <Input
-              id="profile-full-name"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              placeholder="Ada Lovelace"
-              maxLength={120}
-              disabled={saving}
-              required
-            />
+            <Label className="text-foreground">Display name</Label>
+            <p className="rounded-md border border-border bg-muted px-3 py-2 text-sm text-foreground">
+              {fullName || '—'}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Only the workspace owner can change your display name.
+            </p>
           </div>
 
           {/* Email */}

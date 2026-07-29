@@ -1,0 +1,17 @@
+-- ============================================================
+-- 062_lock_profile_display_name.sql
+--
+-- Owner decision: agents/users should not be able to change their
+-- own display name from the app — the owner sets/changes names
+-- directly (Supabase dashboard or a future admin UI), so everyone
+-- sees consistent, owner-approved names across the team.
+--
+-- Same mechanism as migration 031's account_id/account_role lockdown:
+-- profiles_update (migration 017) only checks `auth.uid() = user_id`,
+-- not which columns changed, so without this a client could still
+-- PATCH full_name directly even with the UI control removed.
+-- Revoking column-level UPDATE privilege blocks that for PostgREST/
+-- client requests; SECURITY DEFINER functions and the dashboard's
+-- service_role connection are unaffected.
+-- ============================================================
+REVOKE UPDATE (full_name) ON public.profiles FROM authenticated;
