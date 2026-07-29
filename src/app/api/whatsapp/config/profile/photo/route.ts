@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClientForRequest } from '@/lib/supabase/server'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import {
   uploadResumableMedia,
@@ -20,11 +20,11 @@ const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png']
  *   2. POST whatsapp_business_profile with profile_picture_handle
  */
 export async function POST(request: Request) {
-  const supabase = await createClient()
+  const { supabase, bearerToken } = await createClientForRequest(request)
   const {
     data: { user },
     error: authError,
-  } = await supabase.auth.getUser()
+  } = await supabase.auth.getUser(bearerToken)
   if (authError || !user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClientForRequest } from '@/lib/supabase/server'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import {
   getWhatsAppBusinessProfile,
@@ -21,7 +21,7 @@ const VERTICALS = new Set([
 ])
 
 async function resolveConfig(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: Awaited<ReturnType<typeof createClientForRequest>>['supabase'],
   userId: string,
 ) {
   const { data: profile } = await supabase
@@ -48,12 +48,12 @@ async function resolveConfig(
  * mirrors the "Sync Profile" action on respond.io's equivalent page.
  * Nothing is cached locally; this always reflects Meta's current state.
  */
-export async function GET() {
-  const supabase = await createClient()
+export async function GET(request: Request) {
+  const { supabase, bearerToken } = await createClientForRequest(request)
   const {
     data: { user },
     error: authError,
-  } = await supabase.auth.getUser()
+  } = await supabase.auth.getUser(bearerToken)
   if (authError || !user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
@@ -96,11 +96,11 @@ export async function GET() {
  * form-data + the Resumable Upload API.
  */
 export async function PATCH(request: Request) {
-  const supabase = await createClient()
+  const { supabase, bearerToken } = await createClientForRequest(request)
   const {
     data: { user },
     error: authError,
-  } = await supabase.auth.getUser()
+  } = await supabase.auth.getUser(bearerToken)
   if (authError || !user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
