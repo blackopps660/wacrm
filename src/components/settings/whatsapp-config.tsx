@@ -212,13 +212,35 @@ export function WhatsAppConfig() {
     return () => window.removeEventListener('message', onMessage);
   }, [accountId, fetchConfig]);
 
-  function handleEmbeddedSignup() {
+  // Passes the current session's access token to the popup as a Bearer
+  // token (the same `?token=` the mobile flow already relies on)
+  // instead of letting the popup authenticate off its own cookies.
+  //
+  // Without this, a popup opened after the access token has been idle
+  // long enough to need a refresh races the main tab's own client-side
+  // auto-refresh: Supabase's refresh tokens are single-use/rotating, so
+  // whichever of the two (main tab's JS client vs. the popup's server
+  // middleware) refreshes first wins and rotates the cookie; the loser
+  // replays an already-consumed refresh token, gets no user back, and
+  // the popup's exchange call 401s with "Unauthorized" even though the
+  // main tab is clearly still logged in. Handing the popup an
+  // already-valid access token sidesteps that refresh race entirely.
+  async function handleEmbeddedSignup() {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) {
+      toast.error('Your session has expired — please reload the page and sign in again.');
+      return;
+    }
+
     const width = 500;
     const height = 720;
     const left = window.screenX + (window.outerWidth - width) / 2;
     const top = window.screenY + (window.outerHeight - height) / 2;
+    const url = `/whatsapp-embedded-signup?token=${encodeURIComponent(session.access_token)}`;
     window.open(
-      '/whatsapp-embedded-signup',
+      url,
       'whatsapp-embedded-signup',
       `width=${width},height=${height},left=${left},top=${top}`,
     );
