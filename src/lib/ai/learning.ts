@@ -20,7 +20,9 @@ const EXTRACTION_SYSTEM_PROMPT =
   '{"action": "new", "title": "short label", "content": "the reusable knowledge, standalone, usable without seeing this conversation"} for something genuinely new; or ' +
   '{"action": "correct", "document_id": "<the exact id from the numbered list>", "title": "short label", "content": "the corrected, complete replacement text for that document"} when the agent\'s reply contradicts or updates one of the listed documents — "content" must be the FULL corrected document, not just the changed part. ' +
   'Only use "correct" with a document_id that actually appears in the numbered list; never invent one. ' +
-  'Write the content generally (not "as I told you above"), in whatever language the business/agent is using. Never invent facts beyond what the agent actually said.'
+  'Write the content generally (not "as I told you above"). Never invent facts beyond what the agent actually said. ' +
+  'CRITICAL — language and script: both "title" and "content" MUST be written in the exact same language AND script the agent used in their reply above — do not translate, do not paraphrase into English, do not "clean up" into formal English even if that reply mixed languages or used Roman Urdu (Urdu written in Latin letters). ' +
+  'If the agent wrote in Roman Urdu, write the title and content in Roman Urdu. If the agent wrote in Urdu script, use Urdu script. If the agent wrote in English, use English. Match their language exactly, the same way you would quote a source — this knowledge base is read and approved by the business\'s own team, who write and expect it in their own language, not a translated version.'
 
 function buildCandidateList(candidates: KnowledgeCandidate[]): string {
   if (candidates.length === 0) return 'Existing knowledge base documents: (none yet)'
