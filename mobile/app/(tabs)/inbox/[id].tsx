@@ -353,6 +353,8 @@ export default function MessageThreadScreen() {
   const [forwardSearch, setForwardSearch] = useState('');
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [deleteSheetOpen, setDeleteSheetOpen] = useState(false);
+  const [clearChatConfirmOpen, setClearChatConfirmOpen] = useState(false);
+  const [clearingChat, setClearingChat] = useState(false);
   const [pinSheetOpen, setPinSheetOpen] = useState(false);
   const [assignedAgentId, setAssignedAgentId] = useState<string | null>(null);
   const [ownerKind, setOwnerKind] = useState<ConversationOwnerKind>('unassigned');
@@ -990,6 +992,28 @@ export default function MessageThreadScreen() {
     await supabase.from('messages').update({ deleted_at: new Date().toISOString() }).eq('id', messageId);
   }
 
+  // Same deleted_at column as handleDeleteForMe, applied to every
+  // message in the conversation at once — still local-only, WhatsApp
+  // gives businesses no way to unsend from the customer's phone.
+  async function handleClearChat() {
+    setClearingChat(true);
+    const deletedAt = new Date().toISOString();
+    const { error } = await supabase
+      .from('messages')
+      .update({ deleted_at: deletedAt })
+      .eq('conversation_id', conversationId)
+      .is('deleted_at', null);
+    setClearingChat(false);
+    if (error) {
+      showToast('Failed to clear chat');
+      return;
+    }
+    setMessages((prev) => prev.map((m) => (m.deleted_at ? m : { ...m, deleted_at: deletedAt })));
+    setClearChatConfirmOpen(false);
+    setMenuOpen(false);
+    showToast('Chat cleared');
+  }
+
   async function handleCopyMessage() {
     const text = selectedMessage?.content_text;
     setSelectedMessage(null);
@@ -1550,6 +1574,16 @@ export default function MessageThreadScreen() {
                 {contact?.blocked_at ? 'Unblock Contact' : 'Block Contact'}
               </Text>
             </Pressable>
+            <Pressable
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuOpen(false);
+                setClearChatConfirmOpen(true);
+              }}
+            >
+              <Ionicons name="trash-outline" size={20} color={colors.dangerMuted} />
+              <Text style={[styles.menuItemText, { color: colors.dangerMuted }]}>Clear Chat</Text>
+            </Pressable>
           </View>
         </Pressable>
       </Modal>
@@ -1779,6 +1813,41 @@ export default function MessageThreadScreen() {
             <Text style={styles.deleteNote}>
               Only removes this from your own inbox. WhatsApp doesn&apos;t let businesses unsend a message from the customer&apos;s phone.
             </Text>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Clear chat confirm — bulk version of "Delete for Me", same
+          deleted_at column, same local-only caveat. */}
+      <Modal
+        visible={clearChatConfirmOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setClearChatConfirmOpen(false)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setClearChatConfirmOpen(false)}>
+          <View style={styles.menuCard}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.menuTitle}>Clear this chat?</Text>
+            <Text style={styles.deleteNote}>
+              Every message in this conversation will be removed from your team&apos;s inbox.
+              WhatsApp gives businesses no way to unsend a message, so the contact keeps
+              everything on their own phone — this only clears your side.
+            </Text>
+            <Pressable
+              style={styles.menuItem}
+              onPress={handleClearChat}
+              disabled={clearingChat}
+            >
+              {clearingChat ? (
+                <ActivityIndicator color={colors.dangerMuted} size="small" />
+              ) : (
+                <Ionicons name="trash-outline" size={20} color={colors.dangerMuted} />
+              )}
+              <Text style={[styles.menuItemText, { color: colors.dangerMuted }]}>
+                {clearingChat ? 'Clearing…' : 'Clear Chat'}
+              </Text>
+            </Pressable>
           </View>
         </Pressable>
       </Modal>
