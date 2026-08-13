@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { CornerUpLeft, Copy, SmilePlus, Pin, PinOff } from "lucide-react";
+import { CornerUpLeft, Copy, SmilePlus, Pin, PinOff, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -32,6 +32,10 @@ interface MessageActionsProps {
   /** Pin for the given number of hours (from PIN_DURATIONS). */
   onPin: (hours: number) => void;
   onUnpin: () => void;
+  /** Hide this message from the account's own inbox view ("Delete for
+   *  Me" — WhatsApp gives businesses no way to unsend from the
+   *  customer's device, see migration 049). */
+  onDelete: () => void;
   children: ReactNode;
 }
 
@@ -47,6 +51,7 @@ export function MessageActions({
   isPinned,
   onPin,
   onUnpin,
+  onDelete,
   children,
 }: MessageActionsProps) {
   // Touch devices have no hover. Long-press fires `contextmenu`; we capture
@@ -98,6 +103,17 @@ export function MessageActions({
 
   const handleUnpin = () => {
     onUnpin();
+    setTouchOpen(false);
+  };
+
+  const handleDelete = () => {
+    if (
+      window.confirm(
+        "Delete this message? It's removed from your team's inbox — the customer keeps it on their own WhatsApp.",
+      )
+    ) {
+      onDelete();
+    }
     setTouchOpen(false);
   };
 
@@ -203,6 +219,14 @@ export function MessageActions({
             </PopoverContent>
           </Popover>
         )}
+        <button
+          type="button"
+          onClick={handleDelete}
+          className="flex h-5 w-5 items-center justify-center rounded-full text-destructive hover:bg-destructive/10"
+          aria-label="Delete"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
       </div>
       </div>
     </div>

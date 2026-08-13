@@ -38,6 +38,8 @@ import {
   ArrowRightLeft,
   Pin,
   X,
+  MoreVertical,
+  Trash2,
 } from "lucide-react";
 import { format, isToday, isYesterday, differenceInHours } from "date-fns";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +50,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
@@ -248,6 +258,8 @@ export function MessageThread({
     }, 700);
   }, [isRefreshing, onRefresh]);
   const [replyTo, setReplyTo] = useState<ReplyDraft | null>(null);
+  const [clearChatOpen, setClearChatOpen] = useState(false);
+  const [clearingChat, setClearingChat] = useState(false);
 
   // Profiles are bounded by RLS to rows the current user is allowed to
   // see — today that's just the current user, but the dropdown keeps the
@@ -403,6 +415,7 @@ export function MessageThread({
         .from("messages")
         .select("*")
         .eq("conversation_id", conversationId)
+        .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .limit(PAGE_SIZE);
 
@@ -453,6 +466,7 @@ export function MessageThread({
         .from("messages")
         .select("*")
         .eq("conversation_id", conversationId)
+        .is("deleted_at", null)
         .lt("created_at", cursor)
         .order("created_at", { ascending: false })
         .limit(PAGE_SIZE);
@@ -1081,12 +1095,65 @@ export function MessageThread({
     [onUpdateMessage],
   );
 
+  // "Delete for Me" (migration 049) — hides this message from the
+  // account's own inbox view. WhatsApp gives businesses no API to
+  // unsend a message from the customer's device, so this never touches
+  // anything on their side; the confirmation copy in MessageActions
+  // says so explicitly.
+  const handleDeleteMessage = useCallback(
+    async (messageId: string) => {
+      if (messageId.startsWith("temp-")) {
+        toast.error("Wait for the message to finish sending");
+        return;
+      }
+      const deletedAt = new Date().toISOString();
+      onUpdateMessage(messageId, { deleted_at: deletedAt });
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("messages")
+        .update({ deleted_at: deletedAt })
+        .eq("id", messageId);
+      if (error) {
+        console.error("Failed to delete message:", error);
+        toast.error("Failed to delete message");
+        onUpdateMessage(messageId, { deleted_at: null });
+        return;
+      }
+      toast.success("Message deleted");
+    },
+    [onUpdateMessage],
+  );
+
+  // "Clear chat" — same deleted_at column, applied to every message in
+  // the conversation at once. Still local-only/reversible-by-database-
+  // only, not a real unsend; the confirmation dialog says so.
+  const handleClearChat = useCallback(async () => {
+    if (!conversation) return;
+    setClearingChat(true);
+    const deletedAt = new Date().toISOString();
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("messages")
+      .update({ deleted_at: deletedAt })
+      .eq("conversation_id", conversation.id)
+      .is("deleted_at", null);
+    setClearingChat(false);
+    if (error) {
+      console.error("Failed to clear chat:", error);
+      toast.error("Failed to clear chat");
+      return;
+    }
+    messages.forEach((m) => onUpdateMessage(m.id, { deleted_at: deletedAt }));
+    setClearChatOpen(false);
+    toast.success("Chat cleared");
+  }, [conversation, messages, onUpdateMessage]);
+
   // Active pins = pinned and not yet expired. Newest pin wins the banner
   // slot; expiry is a pure read-time comparison so no sweeper is needed.
   const activePins = useMemo(() => {
     const t = Date.now();
     return messages
-      .filter((m) => m.pinned_until && new Date(m.pinned_until).getTime() > t)
+      .filter((m) => !m.deleted_at && m.pinned_until && new Date(m.pinned_until).getTime() > t)
       .sort(
         (a, b) =>
           new Date(b.pinned_at ?? 0).getTime() -
@@ -1123,7 +1190,8 @@ export function MessageThread({
   }
 
   const displayName = contact.name || contact.phone;
-  const messageGroups = groupMessagesByDate(messages);
+  const visibleMessages = messages.filter((m) => !m.deleted_at);
+  const messageGroups = groupMessagesByDate(visibleMessages);
   const currentStatus = STATUS_OPTIONS.find(
     (s) => s.value === conversation.status
   );
@@ -1363,6 +1431,28 @@ export function MessageThread({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {/* Overflow menu — currently just "Clear chat"; room for more
+              conversation-level actions later without crowding the
+              header's icon row. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              aria-label="More options"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <MoreVertical className="h-3.5 w-3.5" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="border-border bg-popover">
+              <DropdownMenuItem
+                onClick={() => setClearChatOpen(true)}
+                disabled={visibleMessages.length === 0}
+                className="text-sm text-destructive focus:text-destructive"
+              >
+                <Trash2 className="mr-2 h-3.5 w-3.5" />
+                Clear chat
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -1414,7 +1504,7 @@ export function MessageThread({
           <div className="flex items-center justify-center py-12">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
-        ) : messages.length === 0 ? (
+        ) : visibleMessages.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12">
             <p className="text-sm text-muted-foreground">No messages yet</p>
             <p className="text-xs text-muted-foreground">
@@ -1489,6 +1579,7 @@ export function MessageThread({
                           isPinned={pinned}
                           onPin={(hours) => void handlePinMessage(msg.id, hours)}
                           onUnpin={() => void handleUnpinMessage(msg.id)}
+                          onDelete={() => void handleDeleteMessage(msg.id)}
                         >
                           <MessageBubble
                             message={msg}
@@ -1526,6 +1617,34 @@ export function MessageThread({
         onOpenChange={setTemplateModalOpen}
         onSelect={handleSendTemplate}
       />
+
+      <Dialog open={clearChatOpen} onOpenChange={setClearChatOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-destructive">Clear this chat?</DialogTitle>
+            <DialogDescription>
+              Every message in this conversation will be removed from your team&apos;s inbox.
+              WhatsApp gives businesses no way to unsend a message, so {displayName} keeps
+              everything on their own phone — this only clears your side.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setClearChatOpen(false)} disabled={clearingChat}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={() => void handleClearChat()} disabled={clearingChat}>
+              {clearingChat ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Clearing…
+                </>
+              ) : (
+                "Clear chat"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
