@@ -355,6 +355,8 @@ export default function MessageThreadScreen() {
   const [deleteSheetOpen, setDeleteSheetOpen] = useState(false);
   const [clearChatConfirmOpen, setClearChatConfirmOpen] = useState(false);
   const [clearingChat, setClearingChat] = useState(false);
+  const [deleteConvConfirmOpen, setDeleteConvConfirmOpen] = useState(false);
+  const [deletingConv, setDeletingConv] = useState(false);
   const [pinSheetOpen, setPinSheetOpen] = useState(false);
   const [assignedAgentId, setAssignedAgentId] = useState<string | null>(null);
   const [ownerKind, setOwnerKind] = useState<ConversationOwnerKind>('unassigned');
@@ -1014,6 +1016,25 @@ export default function MessageThreadScreen() {
     showToast('Chat cleared');
   }
 
+  // Whole-conversation delete — same deleted_at column on `conversations`
+  // (migration 063). Unlike Clear Chat, this also hides the conversation
+  // itself from the inbox list, so we navigate back once it's gone.
+  async function handleDeleteConversation() {
+    setDeletingConv(true);
+    const { error } = await supabase
+      .from('conversations')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', conversationId);
+    setDeletingConv(false);
+    if (error) {
+      showToast('Failed to delete conversation');
+      return;
+    }
+    setDeleteConvConfirmOpen(false);
+    setMenuOpen(false);
+    router.back();
+  }
+
   async function handleCopyMessage() {
     const text = selectedMessage?.content_text;
     setSelectedMessage(null);
@@ -1584,6 +1605,18 @@ export default function MessageThreadScreen() {
               <Ionicons name="trash-outline" size={20} color={colors.dangerMuted} />
               <Text style={[styles.menuItemText, { color: colors.dangerMuted }]}>Clear Chat</Text>
             </Pressable>
+            <Pressable
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuOpen(false);
+                setDeleteConvConfirmOpen(true);
+              }}
+            >
+              <Ionicons name="trash-bin-outline" size={20} color={colors.dangerMuted} />
+              <Text style={[styles.menuItemText, { color: colors.dangerMuted }]}>
+                Delete Conversation
+              </Text>
+            </Pressable>
           </View>
         </Pressable>
       </Modal>
@@ -1846,6 +1879,42 @@ export default function MessageThreadScreen() {
               )}
               <Text style={[styles.menuItemText, { color: colors.dangerMuted }]}>
                 {clearingChat ? 'Clearing…' : 'Clear Chat'}
+              </Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Delete conversation confirm — same deleted_at column on
+          `conversations`, but this also removes it from the inbox list
+          entirely, so we navigate back on success. */}
+      <Modal
+        visible={deleteConvConfirmOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDeleteConvConfirmOpen(false)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setDeleteConvConfirmOpen(false)}>
+          <View style={styles.menuCard}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.menuTitle}>Delete this conversation?</Text>
+            <Text style={styles.deleteNote}>
+              This removes the whole conversation from your team&apos;s inbox. WhatsApp gives
+              businesses no way to unsend messages, so the contact keeps everything on their own
+              phone.
+            </Text>
+            <Pressable
+              style={styles.menuItem}
+              onPress={handleDeleteConversation}
+              disabled={deletingConv}
+            >
+              {deletingConv ? (
+                <ActivityIndicator color={colors.dangerMuted} size="small" />
+              ) : (
+                <Ionicons name="trash-bin-outline" size={20} color={colors.dangerMuted} />
+              )}
+              <Text style={[styles.menuItemText, { color: colors.dangerMuted }]}>
+                {deletingConv ? 'Deleting…' : 'Delete Conversation'}
               </Text>
             </Pressable>
           </View>

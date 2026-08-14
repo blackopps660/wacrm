@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   Modal,
+  Alert,
   type StyleProp,
   type TextStyle,
 } from 'react-native';
@@ -258,6 +259,7 @@ export default function InboxListScreen() {
       .from('conversations')
       .select(CONVERSATION_SELECT)
       .is('archived_at', null)
+      .is('deleted_at', null)
       .order('last_message_at', { ascending: false })
       .limit(PAGE_SIZE);
     query =
@@ -424,6 +426,32 @@ export default function InboxListScreen() {
     setConversations((prev) => (next ? prev.filter((c) => c.id !== item.id) : prev));
     await supabase.from('conversations').update({ archived_at: next }).eq('id', item.id);
     fetchCounts();
+  }
+
+  // Whole-conversation version of the chat-thread's "Clear Chat" — same
+  // deleted_at column (migration 063), same local-only caveat. A new
+  // inbound/outbound message un-deletes it automatically (migration
+  // trigger), same as archive, so an active conversation can't get
+  // permanently lost this way.
+  function handleDeleteConversation(item: Conversation) {
+    setActionTarget(null);
+    Alert.alert(
+      'Delete conversation?',
+      "This removes the whole conversation from your team's inbox. WhatsApp gives businesses no way to unsend messages, so the contact keeps everything on their own phone.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const deletedAt = new Date().toISOString();
+            setConversations((prev) => prev.filter((c) => c.id !== item.id));
+            await supabase.from('conversations').update({ deleted_at: deletedAt }).eq('id', item.id);
+            fetchCounts();
+          },
+        },
+      ],
+    );
   }
 
   // Client-side — the list is already small (PAGE_SIZE=30, realtime-
@@ -675,6 +703,15 @@ export default function InboxListScreen() {
                 <Pressable style={styles.menuItem} onPress={() => handleToggleArchive(actionTarget)}>
                   <Ionicons name="archive-outline" size={20} color={colors.textSecondary} />
                   <Text style={styles.menuItemText}>Archive Chat</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.menuItem}
+                  onPress={() => handleDeleteConversation(actionTarget)}
+                >
+                  <Ionicons name="trash-outline" size={20} color={colors.dangerMuted} />
+                  <Text style={[styles.menuItemText, { color: colors.dangerMuted }]}>
+                    Delete Conversation
+                  </Text>
                 </Pressable>
               </>
             )}

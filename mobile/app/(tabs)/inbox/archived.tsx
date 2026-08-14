@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, FlatList, Pressable, StyleSheet, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, FlatList, Pressable, StyleSheet, ActivityIndicator, Modal, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../../lib/supabase';
@@ -26,6 +26,7 @@ export default function ArchivedScreen() {
       .from('conversations')
       .select(CONVERSATION_SELECT)
       .not('archived_at', 'is', null)
+      .is('deleted_at', null)
       .order('archived_at', { ascending: false });
     if (error) {
       console.error('[Archived] fetch error:', error.message);
@@ -56,6 +57,28 @@ export default function ArchivedScreen() {
     setActionTarget(null);
     setConversations((prev) => prev.filter((c) => c.id !== item.id));
     await supabase.from('conversations').update({ archived_at: null }).eq('id', item.id);
+  }
+
+  function handleDeleteConversation(item: Conversation) {
+    setActionTarget(null);
+    Alert.alert(
+      'Delete conversation?',
+      "This removes the whole conversation from your team's inbox. WhatsApp gives businesses no way to unsend messages, so the contact keeps everything on their own phone.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setConversations((prev) => prev.filter((c) => c.id !== item.id));
+            await supabase
+              .from('conversations')
+              .update({ deleted_at: new Date().toISOString() })
+              .eq('id', item.id);
+          },
+        },
+      ],
+    );
   }
 
   if (loading) {
@@ -109,10 +132,21 @@ export default function ArchivedScreen() {
           <View style={styles.menuCard}>
             <View style={styles.sheetHandle} />
             {actionTarget && (
-              <Pressable style={styles.menuItem} onPress={() => handleUnarchive(actionTarget)}>
-                <Ionicons name="archive-outline" size={20} color={colors.textSecondary} />
-                <Text style={styles.menuItemText}>Unarchive Chat</Text>
-              </Pressable>
+              <>
+                <Pressable style={styles.menuItem} onPress={() => handleUnarchive(actionTarget)}>
+                  <Ionicons name="archive-outline" size={20} color={colors.textSecondary} />
+                  <Text style={styles.menuItemText}>Unarchive Chat</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.menuItem}
+                  onPress={() => handleDeleteConversation(actionTarget)}
+                >
+                  <Ionicons name="trash-outline" size={20} color={colors.dangerMuted} />
+                  <Text style={[styles.menuItemText, { color: colors.dangerMuted }]}>
+                    Delete Conversation
+                  </Text>
+                </Pressable>
+              </>
             )}
           </View>
         </Pressable>

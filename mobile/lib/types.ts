@@ -65,6 +65,7 @@ export interface Conversation {
   pinned_at?: string | null;
   muted_at?: string | null;
   archived_at?: string | null;
+  deleted_at?: string | null;
 }
 
 export type SenderType = 'customer' | 'agent' | 'bot';
