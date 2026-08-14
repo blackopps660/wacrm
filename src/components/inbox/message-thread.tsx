@@ -260,6 +260,8 @@ export function MessageThread({
   const [replyTo, setReplyTo] = useState<ReplyDraft | null>(null);
   const [clearChatOpen, setClearChatOpen] = useState(false);
   const [clearingChat, setClearingChat] = useState(false);
+  const [deleteConversationOpen, setDeleteConversationOpen] = useState(false);
+  const [deletingConversation, setDeletingConversation] = useState(false);
 
   // Profiles are bounded by RLS to rows the current user is allowed to
   // see — today that's just the current user, but the dropdown keeps the
@@ -1148,6 +1150,30 @@ export function MessageThread({
     toast.success("Chat cleared");
   }, [conversation, messages, onUpdateMessage]);
 
+  // Whole-conversation delete (migration 063) — same deleted_at pattern
+  // as message/chat delete, but hides the conversation itself from the
+  // inbox list too, not just its messages. Backs out of the thread on
+  // success via `onBack`, the same callback the mobile-width back
+  // arrow uses, since there's nothing left here to show.
+  const handleDeleteConversation = useCallback(async () => {
+    if (!conversation) return;
+    setDeletingConversation(true);
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("conversations")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", conversation.id);
+    setDeletingConversation(false);
+    if (error) {
+      console.error("Failed to delete conversation:", error);
+      toast.error("Failed to delete conversation");
+      return;
+    }
+    setDeleteConversationOpen(false);
+    toast.success("Conversation deleted");
+    onBack?.();
+  }, [conversation, onBack]);
+
   // Active pins = pinned and not yet expired. Newest pin wins the banner
   // slot; expiry is a pure read-time comparison so no sweeper is needed.
   const activePins = useMemo(() => {
@@ -1451,6 +1477,13 @@ export function MessageThread({
                 <Trash2 className="mr-2 h-3.5 w-3.5" />
                 Clear chat
               </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => setDeleteConversationOpen(true)}
+                className="text-sm text-destructive focus:text-destructive"
+              >
+                <Trash2 className="mr-2 h-3.5 w-3.5" />
+                Delete conversation
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -1640,6 +1673,42 @@ export function MessageThread({
                 </>
               ) : (
                 "Clear chat"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteConversationOpen} onOpenChange={setDeleteConversationOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-destructive">Delete this conversation?</DialogTitle>
+            <DialogDescription>
+              This removes the whole conversation from your team&apos;s inbox. WhatsApp gives
+              businesses no way to unsend a message, so {displayName} keeps everything on their
+              own phone — this only removes it from your side.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteConversationOpen(false)}
+              disabled={deletingConversation}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void handleDeleteConversation()}
+              disabled={deletingConversation}
+            >
+              {deletingConversation ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                "Delete conversation"
               )}
             </Button>
           </DialogFooter>

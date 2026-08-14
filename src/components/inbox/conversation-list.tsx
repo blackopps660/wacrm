@@ -8,9 +8,10 @@ import {
   normalizeConversations,
 } from "@/lib/inbox/conversations";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import type { Conversation, ConversationStatus, LifecycleStage, Tag } from "@/types";
-import { Search, ChevronDown, X, Bot, User, CircleDashed, SquarePen } from "lucide-react";
+import { Search, ChevronDown, X, Bot, User, CircleDashed, SquarePen, Trash2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Input } from "@/components/ui/input";
 import {
@@ -47,6 +48,11 @@ interface ConversationListProps {
    * doesn't discard older pages the user already loaded.
    */
   onConversationsLoaded: (conversations: Conversation[]) => void;
+  /** Called after a row's own "Delete conversation" hover action
+   *  succeeds, so the parent can drop it from state (and close the
+   *  thread if it happened to be open). Optional so existing callers
+   *  don't break; the action just doesn't render without it. */
+  onConversationDeleted?: (conversationId: string) => void;
   /**
    * Increment to force the fetch effect below to refire. The parent
    * bumps this on realtime reconnect / tab visibility → visible so the
@@ -107,6 +113,7 @@ export function ConversationList({
   onSelect,
   conversations,
   onConversationsLoaded,
+  onConversationDeleted,
   resyncToken = 0,
   onNewConversation,
 }: ConversationListProps) {
@@ -175,6 +182,7 @@ export function ConversationList({
       const { data, error } = await supabase
         .from("conversations")
         .select(CONVERSATION_SELECT)
+        .is("deleted_at", null)
         .order("last_message_at", { ascending: false })
         .limit(PAGE_SIZE);
 
@@ -226,6 +234,7 @@ export function ConversationList({
       let query = supabase
         .from("conversations")
         .select(CONVERSATION_SELECT)
+        .is("deleted_at", null)
         .order("last_message_at", { ascending: false })
         .limit(PAGE_SIZE);
       // No cursor (all loaded rows had a null last_message_at, which
@@ -358,6 +367,7 @@ export function ConversationList({
       let query = supabase
         .from("conversations")
         .select(CONVERSATION_SELECT)
+        .is("deleted_at", null)
         .order(section === "archived" ? "archived_at" : "last_message_at", {
           ascending: false,
         })
@@ -415,7 +425,9 @@ export function ConversationList({
 
   const sectioned = useMemo(() => {
     if (section === "closed" || section === "archived") return sectionRows;
-    return conversations.filter((c) => c.status !== "closed" && !c.archived_at);
+    return conversations.filter(
+      (c) => c.status !== "closed" && !c.archived_at && !c.deleted_at,
+    );
   }, [conversations, section, sectionRows]);
 
   const sectionAllCount =
@@ -991,6 +1003,7 @@ export function ConversationList({
                   conversation={conv}
                   isActive={conv.id === activeConversationId}
                   onSelect={handleSelect}
+                  onDelete={onConversationDeleted}
                 />
               ))}
             </div>
@@ -1036,6 +1049,7 @@ interface ConversationItemProps {
   conversation: Conversation;
   isActive: boolean;
   onSelect: (conversation: Conversation) => void;
+  onDelete?: (conversationId: string) => void;
 }
 
 // Memoized — the parent replaces the whole `conversations` array on
@@ -1048,14 +1062,44 @@ const ConversationItem = memo(function ConversationItem({
   conversation,
   isActive,
   onSelect,
+  onDelete,
 }: ConversationItemProps) {
   const contact = conversation.contact;
   const displayName = contact?.name || contact?.phone || "Unknown";
   const initials = displayName.charAt(0).toUpperCase();
+  const [deleting, setDeleting] = useState(false);
 
   const handleClick = useCallback(() => {
     onSelect(conversation);
   }, [onSelect, conversation]);
+
+  const handleDeleteClick = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (
+        !window.confirm(
+          `Delete the conversation with ${displayName}? It's removed from your team's inbox — WhatsApp gives businesses no way to unsend, so they keep everything on their own phone.`,
+        )
+      ) {
+        return;
+      }
+      setDeleting(true);
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("conversations")
+        .update({ deleted_at: new Date().toISOString() })
+        .eq("id", conversation.id);
+      if (error) {
+        console.error("Failed to delete conversation:", error);
+        toast.error("Failed to delete conversation");
+        setDeleting(false);
+        return;
+      }
+      toast.success("Conversation deleted");
+      onDelete?.(conversation.id);
+    },
+    [conversation.id, displayName, onDelete],
+  );
 
   const timeAgo = conversation.last_message_at
     ? formatDistanceToNow(new Date(conversation.last_message_at), {
@@ -1066,10 +1110,11 @@ const ConversationItem = memo(function ConversationItem({
   const isUnread = conversation.unread_count > 0;
 
   return (
+    <div className="group/row relative">
     <button
       onClick={handleClick}
       className={cn(
-        "flex w-full items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50",
+        "flex w-full items-start gap-3 px-3 py-3 pr-9 text-left transition-colors hover:bg-muted/50",
         isActive && "border-l-2 border-primary bg-muted/70",
         isUnread && !isActive && "bg-muted/25"
       )}
@@ -1146,5 +1191,18 @@ const ConversationItem = memo(function ConversationItem({
         </div>
       </div>
     </button>
+    {onDelete && (
+      <button
+        type="button"
+        onClick={(e) => void handleDeleteClick(e)}
+        disabled={deleting}
+        aria-label="Delete conversation"
+        title="Delete conversation"
+        className="absolute right-2.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover/row:opacity-100 disabled:opacity-50"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    )}
+    </div>
   );
 });

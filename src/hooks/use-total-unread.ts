@@ -36,7 +36,8 @@ export function useTotalUnread(accountId: string | null): number {
       const { data, error } = await supabase
         .from("conversations")
         .select("id, unread_count")
-        .eq("account_id", accountId);
+        .eq("account_id", accountId)
+        .is("deleted_at", null);
       if (cancelled || error || !data) return;
 
       const map = new Map<string, number>();
@@ -67,7 +68,11 @@ export function useTotalUnread(accountId: string | null): number {
             if (oldRow.id) map.delete(oldRow.id);
           } else {
             const row = payload.new as Conversation;
-            map.set(row.id, row.unread_count ?? 0);
+            if (row.deleted_at) {
+              map.delete(row.id);
+            } else {
+              map.set(row.id, row.unread_count ?? 0);
+            }
           }
           // Recompute — cheap, conversations per user stay small.
           let sum = 0;

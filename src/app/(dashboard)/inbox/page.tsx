@@ -578,6 +578,20 @@ export default function InboxPage() {
     router.replace("/inbox", { scroll: false });
   }, [router]);
 
+  // A conversation was soft-deleted (from the list's own hover action,
+  // not the thread header's — that path already closes via onBack).
+  // Drop it from local state and, if it happened to be the open thread,
+  // close that too.
+  const handleConversationDeleted = useCallback(
+    (id: string) => {
+      setConversations((prev) => prev.filter((c) => c.id !== id));
+      if (activeConversation?.id === id) {
+        handleCloseConversation();
+      }
+    },
+    [activeConversation, handleCloseConversation],
+  );
+
 
   // Fires for every message batch the thread fetches — the first page
   // (open / resync) and each "Load older messages" page alike. Merges by
@@ -689,6 +703,7 @@ export default function InboxPage() {
             onSelect={handleSelectConversation}
             conversations={conversations}
             onConversationsLoaded={handleConversationsLoaded}
+            onConversationDeleted={handleConversationDeleted}
             resyncToken={resyncToken}
             onNewConversation={() => setNewConversationOpen(true)}
           />
